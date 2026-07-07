@@ -201,6 +201,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
   <button class="tab-btn" data-tab="tarifs">2. Grille tarifaire</button>
   <button class="tab-btn" data-tab="equipes">3. Répartition équipes</button>
   <button class="tab-btn" data-tab="dashboard">4. Dashboard</button>
+  <button class="tab-btn" data-tab="historique">5. Historique</button>
 </nav>
 
 <div class="app app-content" style="display:none;">
@@ -229,7 +230,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
       </div>
       <div class="card">
         <h3>Mails</h3>
-        <div class="hint">Colonnes attendues : Conseiller: Nom complet, Date du message</div>
+        <div class="hint">Colonnes attendues : Conseiller: Nom complet, Date du message. Les lignes dont la dernière colonne = 0 sont exclues.</div>
         <div class="dropzone" id="dz-mails" onclick="document.getElementById('f-mails').click()">
           <input type="file" id="f-mails" accept=".xls,.xlsx,.csv">
           <div class="label">Cliquer ou déposer le fichier</div>
@@ -271,7 +272,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
 
     <div class="row-actions" style="margin-top:20px;">
       <button class="btn" onclick="runCalculation()">▶ Lancer le calcul</button>
-      <button class="btn secondary" onclick="clearAllFiles()">Réinitialiser les fichiers</button>
+      <button class="btn secondary" onclick="clearAllFiles()">Réinitialiser (fichiers + données sauvegardées)</button>
       <span id="calc-status" style="font-size:12.5px;color:#8993a4;"></span>
     </div>
     <div class="log" id="log" style="margin-top:14px;"></div>
@@ -355,11 +356,49 @@ if(sessionStorage.getItem('dashca_auth_user')){
 
   <!-- ===================== 4. DASHBOARD ===================== -->
   <section class="panel" id="panel-dashboard">
-    <div class="row-actions">
-      <label style="font-size:12.5px;">Du <input type="date" id="date-start" style="width:150px;display:inline-block;"></label>
-      <label style="font-size:12.5px;">Au <input type="date" id="date-end" style="width:150px;display:inline-block;"></label>
-      <button class="btn small" onclick="renderDashboard()">Appliquer la période</button>
-      <button class="btn small secondary" onclick="exportCsv()">Exporter le détail (CSV)</button>
+    <div class="card" style="margin-bottom:16px;">
+      <div class="row-actions">
+        <label style="font-size:12.5px;">Vue
+          <select id="period-mode" style="width:130px;display:inline-block;" onchange="onPeriodModeChange()">
+            <option value="custom">Personnalisée</option>
+            <option value="day">Jour</option>
+            <option value="week">Semaine</option>
+            <option value="month">Mois</option>
+          </select>
+        </label>
+        <label style="font-size:12.5px;" id="ref-date-label">Date de référence
+          <input type="date" id="ref-date" style="width:150px;display:inline-block;" onchange="onRefDateChange()">
+        </label>
+        <label style="font-size:12.5px;" id="custom-range-label">Du
+          <input type="date" id="date-start" style="width:150px;display:inline-block;">
+          Au <input type="date" id="date-end" style="width:150px;display:inline-block;">
+        </label>
+        <label style="font-size:12.5px;">Activité
+          <select id="filter-activite" style="width:140px;display:inline-block;">
+            <option value="">Toutes</option>
+            <option value="LOT UNIQUE">LOT UNIQUE</option>
+            <option value="SAV">SAV</option>
+            <option value="Barcelone">Barcelone</option>
+          </select>
+        </label>
+        <button class="btn small" onclick="renderDashboard()">Appliquer</button>
+        <button class="btn small secondary" onclick="exportCsv()">Exporter le détail (CSV)</button>
+        <button class="btn small" style="background:var(--green);" onclick="archiveCurrentView()">📦 Archiver cette vue</button>
+      </div>
+      <div class="row-actions" style="margin-bottom:8px;">
+        <span style="font-size:12.5px;font-weight:600;color:#8a5c1a;">
+          Heures Barcelone (saisie manuelle par jour, 30,4344 €/h) — activité "Barcelone"
+        </span>
+        <span class="footnote" id="barcelone-ca-preview" style="margin:0;"></span>
+      </div>
+      <div class="table-wrap" id="barcelone-days-wrap" style="max-height:220px;">
+        <table>
+          <thead><tr>
+            <th>Date</th><th>Mada (14,25 €/h)</th><th>Fès (30,4344 €/h)</th><th>Casablanca (30,4344 €/h)</th><th>CA jour (€)</th>
+          </tr></thead>
+          <tbody id="barcelone-days-body"></tbody>
+        </table>
+      </div>
     </div>
 
     <div id="dashboard-empty" class="empty">Importez les fichiers et lancez le calcul depuis l'onglet "1. Import" pour afficher le dashboard.</div>
@@ -388,6 +427,24 @@ if(sessionStorage.getItem('dashca_auth_user')){
     </div>
   </section>
 
+  <!-- ===================== 5. HISTORIQUE ===================== -->
+  <section class="panel" id="panel-historique">
+    <div class="section-title">Historique des CA archivés</div>
+    <div class="footnote" style="margin-bottom:14px;">
+      Chaque archive fige le CA calculé pour la vue affichée au moment du clic sur "📦 Archiver cette vue" (période, filtre activité, heures Barcelone inclus). Utile pour garder une trace mensuelle/hebdomadaire même après un recalcul ultérieur.
+    </div>
+    <div id="historique-empty" class="empty">Aucune archive pour le moment. Depuis l'onglet Dashboard, cliquez sur "📦 Archiver cette vue" pour en créer une.</div>
+    <div class="table-wrap" id="historique-wrap" style="display:none;">
+      <table>
+        <thead><tr>
+          <th>Archivé le</th><th>Libellé</th><th>Période</th><th>Activité</th>
+          <th>Actes</th><th>CA (€)</th><th></th>
+        </tr></thead>
+        <tbody id="historique-body"></tbody>
+      </table>
+    </div>
+  </section>
+
 </div>
 
 <script>
@@ -400,6 +457,8 @@ const state = {
   lotUnique:[], sav:[], fluxMap:[],
   tarifs:[],
   dmtFormula:'',
+  barceloneHeures:{}, // {periodKey: heures}
+  archives:[],
   results:[], // {date, site, activite, type, unite, qty, ca}
   dmt:{global:null, bysite:{}}
 };
@@ -579,6 +638,7 @@ function setupDropzone(id, inputId, onLoaded){
 setupDropzone('dz-entrants','f-entrants',(res,file)=>{
   const sheet = res.sheets[res.sheetNames[0]];
   state.raw.entrants = sheet;
+  state.files.entrants = file.name;
   document.getElementById('dz-entrants').classList.add('ok');
   document.getElementById('st-entrants').textContent = file.name+' — '+sheet.length+' lignes';
   log('Appels entrants chargés : '+sheet.length+' lignes', 'ok');
@@ -586,6 +646,7 @@ setupDropzone('dz-entrants','f-entrants',(res,file)=>{
 setupDropzone('dz-sortants','f-sortants',(res,file)=>{
   const sheet = res.sheets[res.sheetNames[0]];
   state.raw.sortants = sheet;
+  state.files.sortants = file.name;
   document.getElementById('dz-sortants').classList.add('ok');
   document.getElementById('st-sortants').textContent = file.name+' — '+sheet.length+' lignes';
   log('Appels sortants chargés : '+sheet.length+' lignes', 'ok');
@@ -593,6 +654,7 @@ setupDropzone('dz-sortants','f-sortants',(res,file)=>{
 setupDropzone('dz-mails','f-mails',(res,file)=>{
   const sheet = res.sheets[res.sheetNames[0]];
   state.raw.mails = sheet;
+  state.files.mails = file.name;
   document.getElementById('dz-mails').classList.add('ok');
   document.getElementById('st-mails').textContent = file.name+' — '+sheet.length+' lignes';
   log('Mails chargés : '+sheet.length+' lignes', 'ok');
@@ -630,14 +692,23 @@ setupDropzone('dz-flux','f-flux',(res,file)=>{
   log('Référentiel flux chargé : '+state.fluxMap.length+' files mappées', 'ok');
 });
 
-function clearAllFiles(){
+async function clearAllFiles(){
   state.raw = {entrants:[], sortants:[], mails:[]};
+  state.files = {entrants:null, sortants:null, mails:null, repartition:null, flux:null};
+  state.results = [];
+  state.dmt = {global:null, bysite:{}};
   ['entrants','sortants','mails','repartition','flux'].forEach(k=>{
     document.getElementById('dz-'+k).classList.remove('ok');
     document.getElementById('st-'+k).textContent = 'Aucun fichier chargé';
     document.getElementById('f-'+k).value = '';
   });
   document.getElementById('log').innerHTML='';
+  try{
+    await storage.set('last_results', '');
+    await storage.set('last_dmt', '');
+    await storage.set('last_meta', '');
+  }catch(e){}
+  renderDashboard();
 }
 
 /* =========================================================================
@@ -674,6 +745,9 @@ function runCalculation(){
     log('Aucun fichier chargé.', 'err');
     return;
   }
+  return runCalculationAsync();
+}
+async function runCalculationAsync(){
   const maps = buildMaps();
   const excludeShort = document.getElementById('opt-exclude-short').checked;
   const threshold = Number(document.getElementById('opt-short-threshold').value)||30;
@@ -727,15 +801,18 @@ function runCalculation(){
     const sample = state.raw.mails[0];
     const agentCol = findCol(sample, ['Conseiller: Nom complet','Conseiller']);
     const dateCol = findCol(sample, ['Date du message','Date']);
-    let n_ok=0, n_skip=0;
+    const lastCol = Object.keys(sample)[Object.keys(sample).length - 1];
+    let n_ok=0, n_skip=0, n_skip_zero=0;
     state.raw.mails.forEach(r=>{
+      const lastVal = Number(r[lastCol]);
+      if(!isNaN(lastVal) && lastVal === 0){ n_skip_zero++; return; }
       const {site, act} = classifyAgent(r[agentCol], maps);
       if(!site){ n_skip++; return; }
       const activite = mailMutualise ? 'LOT UNIQUE' : act;
       rows.push({date:parseDate(r[dateCol]), site, activite, type:'Mails'});
       n_ok++;
     });
-    log('Mails : '+n_ok+' actes retenus, '+n_skip+' agent non identifié', 'ok');
+    log('Mails : '+n_ok+' actes retenus, '+n_skip_zero+' exclus ('+lastCol+'=0), '+n_skip+' agent non identifié', 'ok');
   }
 
   if(sortantsDurees.length){
@@ -765,6 +842,22 @@ function runCalculation(){
     document.getElementById('date-end').value = dates[dates.length-1];
   }
   renderDashboard();
+
+  // Sauvegarde des résultats agrégés + DMT pour restaurer au prochain chargement
+  try{
+    await storage.set('last_results', JSON.stringify(state.results));
+    await storage.set('last_dmt', JSON.stringify(state.dmt));
+    const meta = {
+      savedAt: new Date().toISOString(),
+      files: {
+        entrants: state.files.entrants || null,
+        sortants: state.files.sortants || null,
+        mails: state.files.mails || null,
+      }
+    };
+    await storage.set('last_meta', JSON.stringify(meta));
+    log('Données sauvegardées — seront rechargées automatiquement à la prochaine ouverture.', 'ok');
+  }catch(e){ log('Avertissement : sauvegarde des données impossible ('+e.message+').', 'err'); }
 }
 
 function updateDmtDisplay(){
@@ -804,6 +897,84 @@ function priceFor(site, activite, type, siteDmtSec, isFerie){
 /* =========================================================================
    DASHBOARD RENDERING
 ========================================================================= */
+function periodKey(ds, de){ return (ds||'')+'_'+(de||''); }
+
+function onPeriodModeChange(){
+  const mode = document.getElementById('period-mode').value;
+  document.getElementById('ref-date-label').style.display = (mode==='custom') ? 'none' : 'inline-block';
+  document.getElementById('custom-range-label').style.display = (mode==='custom') ? 'inline-block' : 'none';
+  if(mode!=='custom') applyPeriodFromRef();
+}
+function onRefDateChange(){ applyPeriodFromRef(); }
+function applyPeriodFromRef(){
+  const mode = document.getElementById('period-mode').value;
+  const refStr = document.getElementById('ref-date').value;
+  if(!refStr) return;
+  const ref = new Date(refStr+'T00:00:00');
+  let start, end;
+  if(mode==='day'){
+    start = end = ref;
+  } else if(mode==='week'){
+    const dow = ref.getDay(); // 0=dimanche
+    const diffToMonday = (dow===0) ? -6 : (1-dow);
+    start = new Date(ref); start.setDate(ref.getDate()+diffToMonday);
+    end = new Date(start); end.setDate(start.getDate()+6);
+  } else if(mode==='month'){
+    start = new Date(ref.getFullYear(), ref.getMonth(), 1);
+    end = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
+  } else { return; }
+  document.getElementById('date-start').value = dateKey(start);
+  document.getElementById('date-end').value = dateKey(end);
+  renderDashboard();
+}
+
+function listDatesInRange(ds, de){
+  const out = [];
+  if(!ds || !de) return out;
+  let cur = new Date(ds+'T00:00:00');
+  const end = new Date(de+'T00:00:00');
+  let guard = 0;
+  while(cur <= end && guard < 2000){
+    out.push(dateKey(cur));
+    cur.setDate(cur.getDate()+1);
+    guard++;
+  }
+  return out;
+}
+
+const BARCELONE_SITES = ['Mada','Fès','Casablanca'];
+const BARCELONE_TARIFS = {'Mada':14.25, 'Fès':30.4344, 'Casablanca':30.4344};
+function barceloneKey(date, site){ return date+'|'+site; }
+
+function renderBarceloneDaysTable(){
+  const ds = document.getElementById('date-start').value;
+  const de = document.getElementById('date-end').value;
+  const dates = listDatesInRange(ds, de);
+  const tbody = document.getElementById('barcelone-days-body');
+  tbody.innerHTML = '';
+  dates.forEach(d=>{
+    let caJour = 0;
+    const inputs = BARCELONE_SITES.map(site=>{
+      const heures = state.barceloneHeures[barceloneKey(d,site)] || 0;
+      caJour += heures * BARCELONE_TARIFS[site];
+      return `<td><input type="number" min="0" step="0.25" value="${heures}" style="width:70px;"
+              onchange="onBarceloneHeureDayChange('${d}','${site}', this.value)"></td>`;
+    }).join('');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${d}</td>${inputs}<td>${fmtEUR(caJour)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function onBarceloneHeureDayChange(dateStr, site, value){
+  const heures = Number(value) || 0;
+  const key = barceloneKey(dateStr, site);
+  if(heures > 0) state.barceloneHeures[key] = heures;
+  else delete state.barceloneHeures[key];
+  try{ await storage.set('barcelone_heures', JSON.stringify(state.barceloneHeures)); }catch(e){}
+  renderDashboard();
+}
+
 function renderDashboard(){
   if(!state.results.length){
     document.getElementById('dashboard-empty').style.display='block';
@@ -815,7 +986,27 @@ function renderDashboard(){
 
   const ds = document.getElementById('date-start').value;
   const de = document.getElementById('date-end').value;
-  const filtered = state.results.filter(r=> (!ds || r.date>=ds) && (!de || r.date<=de));
+  const activiteFilter = document.getElementById('filter-activite').value;
+  let filtered = state.results.filter(r=> (!ds || r.date>=ds) && (!de || r.date<=de));
+  if(activiteFilter) filtered = filtered.filter(r=> r.activite === activiteFilter);
+
+  // Heures Barcelone : saisie manuelle par jour ET par site, sommée sur la période affichée
+  renderBarceloneDaysTable();
+  const datesInRange = listDatesInRange(ds, de);
+  const barceloneBySite = {};
+  let heuresBarcelone = 0, caBarcelone = 0;
+  BARCELONE_SITES.forEach(site=>{
+    const h = datesInRange.reduce((sum,d)=> sum + (state.barceloneHeures[barceloneKey(d,site)]||0), 0);
+    if(h > 0){
+      barceloneBySite[site] = h;
+      heuresBarcelone += h;
+      caBarcelone += h * BARCELONE_TARIFS[site];
+    }
+  });
+  document.getElementById('barcelone-ca-preview').textContent = heuresBarcelone > 0
+    ? `Total période : ${heuresBarcelone} h = ${fmtEUR(caBarcelone)} (activité Barcelone — `+
+      Object.entries(barceloneBySite).map(([s,h])=>s+': '+h+'h').join(', ')+')'
+    : '';
 
   let totalCA=0, totalQty=0;
   const bySite={}, byActivite={};
@@ -834,10 +1025,21 @@ function renderDashboard(){
     detail[dkey].ca += ca;
   });
 
+  if(caBarcelone > 0 && (!activiteFilter || activiteFilter==='Barcelone')){
+    totalCA += caBarcelone;
+    totalQty += heuresBarcelone;
+    byActivite['Barcelone'] = (byActivite['Barcelone']||0) + caBarcelone;
+    Object.entries(barceloneBySite).forEach(([site, h])=>{
+      const ca = h * BARCELONE_TARIFS[site];
+      bySite[site] = (bySite[site]||0) + ca;
+      detail['Barcelone|'+site] = {site:site, activite:'Barcelone', type:'Heures (saisie manuelle)', qty:h, ca:ca};
+    });
+  }
+
   document.getElementById('kpi-ca').textContent = fmtEUR(totalCA);
   document.getElementById('kpi-ca-sub').textContent = ds && de ? ('Période '+ds+' → '+de) : '';
   document.getElementById('kpi-actes').textContent = fmtNum(totalQty);
-  document.getElementById('kpi-actes-sub').textContent = filtered.length+' combinaisons site/activité/type';
+  document.getElementById('kpi-actes-sub').textContent = filtered.length+' combinaisons site/activité/type'+(activiteFilter?' (filtre : '+activiteFilter+')':'');
   document.getElementById('kpi-dmt').textContent = state.dmt.global ? fmtDuree(state.dmt.global) : '—';
   document.getElementById('kpi-dmt-sub').textContent = state.dmtFormula.trim() ? 'Formule active pour le tarif sortant' : 'Tarif sortant = grille fixe';
   const excludeShort = document.getElementById('opt-exclude-short').checked;
@@ -887,6 +1089,103 @@ function exportCsv(){
   a.href = URL.createObjectURL(blob);
   a.download = 'detail_ca.csv';
   a.click();
+}
+
+/* =========================================================================
+   ARCHIVAGE / HISTORIQUE
+========================================================================= */
+async function archiveCurrentView(){
+  if(!state.results.length){
+    log('Rien à archiver : lancez un calcul depuis l\'onglet Import d\'abord.', 'err');
+    return;
+  }
+  const label = prompt('Libellé de cette archive (ex. "Juin 2026", "Semaine 25")', '') || '';
+
+  const ds = document.getElementById('date-start').value;
+  const de = document.getElementById('date-end').value;
+  const activiteFilter = document.getElementById('filter-activite').value;
+  const totalCA = document.getElementById('kpi-ca').textContent;
+  const totalActes = document.getElementById('kpi-actes').textContent;
+  const detail = Array.from(document.querySelectorAll('#detail-body tr')).map(tr=>
+    Array.from(tr.children).map(td=>td.textContent)
+  );
+
+  const archive = {
+    id: Date.now(),
+    archivedAt: new Date().toISOString(),
+    label: label,
+    dateStart: ds, dateEnd: de,
+    activiteFilter: activiteFilter || 'Toutes',
+    totalCA, totalActes,
+    detail
+  };
+  state.archives.unshift(archive);
+  try{
+    await storage.set('archives', JSON.stringify(state.archives));
+    log('Archive créée : '+(label||'(sans libellé)')+' — '+totalCA, 'ok');
+  }catch(e){ log('Erreur lors de l\'archivage : '+e.message, 'err'); }
+  renderHistorique();
+}
+
+function renderHistorique(){
+  const empty = document.getElementById('historique-empty');
+  const wrap = document.getElementById('historique-wrap');
+  if(!state.archives.length){
+    empty.style.display='block'; wrap.style.display='none';
+    return;
+  }
+  empty.style.display='none'; wrap.style.display='block';
+  const tbody = document.getElementById('historique-body');
+  tbody.innerHTML='';
+  state.archives.forEach(a=>{
+    const tr = document.createElement('tr');
+    const archivedAtStr = new Date(a.archivedAt).toLocaleString('fr-FR');
+    const periode = (a.dateStart||'?')+' → '+(a.dateEnd||'?');
+    tr.innerHTML = `<td>${archivedAtStr}</td><td>${a.label||'—'}</td><td>${periode}</td>
+      <td>${a.activiteFilter}</td><td>${a.totalActes}</td><td>${a.totalCA}</td>
+      <td>
+        <button class="btn small secondary" onclick="viewArchive(${a.id})">Voir</button>
+        <button class="btn small danger" onclick="deleteArchive(${a.id})">Supprimer</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function viewArchive(id){
+  const a = state.archives.find(x=>x.id===id);
+  if(!a) return;
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active');
+  document.getElementById('panel-dashboard').classList.add('active');
+
+  document.getElementById('dashboard-empty').style.display='none';
+  document.getElementById('dashboard-content').style.display='block';
+  document.getElementById('kpi-ca').textContent = a.totalCA;
+  document.getElementById('kpi-ca-sub').textContent = 'Archive du '+new Date(a.archivedAt).toLocaleString('fr-FR')+' — '+(a.label||'sans libellé');
+  document.getElementById('kpi-actes').textContent = a.totalActes;
+  document.getElementById('kpi-actes-sub').textContent = 'Vue archivée (lecture seule) — période '+a.dateStart+' → '+a.dateEnd;
+  document.getElementById('kpi-dmt').textContent = '—';
+  document.getElementById('kpi-dmt-sub').textContent = '';
+  document.getElementById('dmt-filter-note').textContent = '';
+
+  const tbody = document.getElementById('detail-body');
+  tbody.innerHTML='';
+  a.detail.forEach(row=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = row.map(v=>`<td>${v}</td>`).join('');
+    tbody.appendChild(tr);
+  });
+  if(chartSite) chartSite.destroy();
+  if(chartActivite) chartActivite.destroy();
+  log('Affichage de l\'archive "'+(a.label||'sans libellé')+'" — cliquez sur "Appliquer" pour revenir aux données live.', 'ok');
+}
+
+async function deleteArchive(id){
+  if(!confirm('Supprimer cette archive ?')) return;
+  state.archives = state.archives.filter(a=>a.id!==id);
+  try{ await storage.set('archives', JSON.stringify(state.archives)); }catch(e){}
+  renderHistorique();
 }
 
 /* =========================================================================
@@ -1070,10 +1369,51 @@ async function loadPersisted(){
     state.sav = s ? JSON.parse(s.value) : [];
   }catch(e){ state.sav = []; }
 
+  try{
+    const b = await storage.get('barcelone_heures');
+    state.barceloneHeures = b ? JSON.parse(b.value) : {};
+  }catch(e){ state.barceloneHeures = {}; }
+
+  // Restaurer les derniers résultats calculés (pour éviter de ré-importer les fichiers à chaque session)
+  try{
+    const r = await storage.get('last_results');
+    const d = await storage.get('last_dmt');
+    const m = await storage.get('last_meta');
+    if(r){
+      state.results = JSON.parse(r.value);
+      if(d) state.dmt = JSON.parse(d.value);
+      if(m){
+        const meta = JSON.parse(m.value);
+        const savedDate = new Date(meta.savedAt).toLocaleString('fr-FR');
+        ['entrants','sortants','mails'].forEach(k=>{
+          if(meta.files && meta.files[k]){
+            document.getElementById('st-'+k).textContent = meta.files[k]+' (dernier calcul : '+savedDate+')';
+            document.getElementById('dz-'+k).classList.add('ok');
+          }
+        });
+        log('Données restaurées depuis le dernier calcul du '+savedDate+'.', 'ok');
+      }
+      const dates = state.results.map(x=>x.date).filter(Boolean).sort();
+      if(dates.length){
+        document.getElementById('date-start').value = dates[0];
+        document.getElementById('date-end').value = dates[dates.length-1];
+      }
+      updateDmtDisplay();
+    }
+  }catch(e){ /* pas de données précédentes, rien à faire */ }
+
+  try{
+    const arc = await storage.get('archives');
+    state.archives = arc ? JSON.parse(arc.value) : [];
+  }catch(e){ state.archives = []; }
+  renderHistorique();
+
   document.getElementById('dmt-formula').value = state.dmtFormula;
   renderTarifs();
   renderEquipes();
   updateDmtPreview();
+  document.getElementById('ref-date-label').style.display = 'none';
+  renderDashboard();
 }
 loadPersisted();
 </script>
