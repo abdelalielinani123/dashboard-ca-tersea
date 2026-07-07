@@ -371,6 +371,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
         <div class="kpi"><div class="lbl">DMT sortant</div><div class="val" id="kpi-dmt">—</div><div class="sub" id="kpi-dmt-sub"></div></div>
       </div>
       <div class="footnote" style="margin-top:-8px;margin-bottom:8px;" id="dmt-filter-note"></div>
+      <div class="footnote" style="margin-bottom:8px;">📅 Les actes du dimanche sont automatiquement facturés au tarif "Jour Férié" de la grille tarifaire.</div>
 
       <div class="grid cols-2" style="margin-top:18px;">
         <div class="chart-wrap"><canvas id="chart-site"></canvas></div>
@@ -403,22 +404,25 @@ const state = {
   dmt:{global:null, bysite:{}}
 };
 
+const TARIFS_VERSION = 2; // Incrémenter à chaque mise à jour officielle de la grille tarifaire
+                           // (v2 : férié à 1,5x exact + SAV Actes traités Casa à 3,915€ - juillet 2026)
 const DEFAULT_TARIFS = [
-  ["Fès","LOT UNIQUE","HYPER","Acte",1.2758,1.9611],
-  ["Fès","LOT UNIQUE","C2E","Acte",2.2853,3.5129],
-  ["Fès","LOT UNIQUE","AFR","Acte",1.9303,2.9672],
-  ["Fès","LOT UNIQUE","Drive","Acte",1.9303,2.9672],
-  ["Fès","LOT UNIQUE","Appels sortants","Acte",0.8653,1.3301],
-  ["Fès","LOT UNIQUE","Mails","Acte",1.6862,2.5920],
+  ["Fès","LOT UNIQUE","HYPER","Acte",1.2758,1.9137],
+  ["Fès","LOT UNIQUE","C2E","Acte",2.2853,3.42795],
+  ["Fès","LOT UNIQUE","AFR","Acte",1.9303,2.89545],
+  ["Fès","LOT UNIQUE","Drive","Acte",1.9303,2.89545],
+  ["Fès","LOT UNIQUE","Appels sortants","Acte",0.8653,1.29795],
+  ["Fès","LOT UNIQUE","Mails","Acte",1.6862,2.5293],
   ["Fès","SAV","Actes traités","Acte",0,0],
-  ["Casablanca","LOT UNIQUE","HYPER","Acte",1.2758,1.9611],
-  ["Casablanca","LOT UNIQUE","C2E","Acte",2.2853,3.5129],
-  ["Casablanca","LOT UNIQUE","AFR","Acte",1.9303,2.9672],
-  ["Casablanca","LOT UNIQUE","Drive","Acte",1.9303,2.9672],
-  ["Casablanca","LOT UNIQUE","Appels sortants","Acte",0.8653,1.3301],
-  ["Casablanca","LOT UNIQUE","Mails","Acte",1.6862,2.5920],
-  ["Casablanca","SAV","Actes traités","Acte",2.61,3.93],
-  ["Casablanca","SAV","Appels sortants","Acte",0.8653,1.3301],
+  ["Casablanca","LOT UNIQUE","HYPER","Acte",1.2758,1.9137],
+  ["Casablanca","LOT UNIQUE","C2E","Acte",2.2853,3.42795],
+  ["Casablanca","LOT UNIQUE","AFR","Acte",1.9303,2.89545],
+  ["Casablanca","LOT UNIQUE","Drive","Acte",1.9303,2.89545],
+  ["Casablanca","LOT UNIQUE","Appels sortants","Acte",0.8653,1.29795],
+  ["Casablanca","LOT UNIQUE","Mails","Acte",1.6862,2.5293],
+  ["Casablanca","SAV","Actes traités","Acte",2.61,3.915],
+  ["Casablanca","SAV","Appels sortants","Acte",0.8653,1.29795],
+  ["Casablanca","SAV","Mails","Acte",1.6862,2.5293],
   ["Mada","LOT UNIQUE","HYPER","Acte",0.79,1.185],
   ["Mada","LOT UNIQUE","C2E","Acte",1.43,2.145],
   ["Mada","LOT UNIQUE","AFR","Acte",1.20,1.800],
@@ -776,7 +780,12 @@ function fmtDuree(sec){
 /* =========================================================================
    PRICING
 ========================================================================= */
-function priceFor(site, activite, type, siteDmtSec){
+function isSunday(dateKeyStr){
+  if(!dateKeyStr) return false;
+  const [y,m,d] = dateKeyStr.split('-').map(Number);
+  return new Date(y, m-1, d).getDay() === 0;
+}
+function priceFor(site, activite, type, siteDmtSec, isFerie){
   if(type === 'Appels sortants' && state.dmtFormula && state.dmtFormula.trim()){
     const dmtSec = siteDmtSec != null ? siteDmtSec : state.dmt.global;
     if(dmtSec != null){
@@ -788,7 +797,8 @@ function priceFor(site, activite, type, siteDmtSec){
     }
   }
   const row = state.tarifs.find(t=>t.site===site && t.activite===activite && t.type===type);
-  return row ? Number(row.prixNormal)||0 : 0;
+  if(!row) return 0;
+  return isFerie ? (Number(row.prixFerie)||0) : (Number(row.prixNormal)||0);
 }
 
 /* =========================================================================
@@ -812,13 +822,14 @@ function renderDashboard(){
   const detail = {};
   filtered.forEach(r=>{
     const siteDmt = state.dmt.bysite[r.site];
-    const price = priceFor(r.site, r.activite, r.type, siteDmt);
+    const ferie = isSunday(r.date);
+    const price = priceFor(r.site, r.activite, r.type, siteDmt, ferie);
     const ca = price * r.qty;
     totalCA += ca; totalQty += r.qty;
     bySite[r.site] = (bySite[r.site]||0) + ca;
     byActivite[r.activite] = (byActivite[r.activite]||0) + ca;
-    const dkey = [r.site,r.activite,r.type].join('|');
-    if(!detail[dkey]) detail[dkey] = {site:r.site, activite:r.activite, type:r.type, qty:0, ca:0};
+    const dkey = [r.site,r.activite,r.type, ferie?'Férié':'Normal'].join('|');
+    if(!detail[dkey]) detail[dkey] = {site:r.site, activite:r.activite, type:r.type+(ferie?' (férié)':''), qty:0, ca:0};
     detail[dkey].qty += r.qty;
     detail[dkey].ca += ca;
   });
@@ -1030,8 +1041,18 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 ========================================================================= */
 async function loadPersisted(){
   try{
-    const t = await storage.get('grille_tarifaire');
-    state.tarifs = t ? JSON.parse(t.value) : JSON.parse(JSON.stringify(DEFAULT_TARIFS));
+    const v = await storage.get('tarifs_version');
+    const savedVersion = v ? Number(v.value) : 0;
+    if(savedVersion < TARIFS_VERSION){
+      // Nouvelle version de grille disponible dans le fichier -> on l'applique et on écrase l'ancienne
+      state.tarifs = JSON.parse(JSON.stringify(DEFAULT_TARIFS));
+      await storage.set('grille_tarifaire', JSON.stringify(state.tarifs));
+      await storage.set('tarifs_version', String(TARIFS_VERSION));
+      log('Grille tarifaire mise à jour automatiquement (nouvelle version disponible).', 'ok');
+    } else {
+      const t = await storage.get('grille_tarifaire');
+      state.tarifs = t ? JSON.parse(t.value) : JSON.parse(JSON.stringify(DEFAULT_TARIFS));
+    }
   }catch(e){ state.tarifs = JSON.parse(JSON.stringify(DEFAULT_TARIFS)); }
 
   try{
