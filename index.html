@@ -1084,7 +1084,8 @@ function exportCsv(){
     rows.push(Array.from(tr.children).map(td=>td.textContent));
   });
   const csv = rows.map(r=>r.join(';')).join('\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const BOM = '\uFEFF'; // nécessaire pour qu'Excel affiche correctement les accents (UTF-8)
+  const blob = new Blob([BOM + csv], {type:'text/csv;charset=utf-8;'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'detail_ca.csv';
