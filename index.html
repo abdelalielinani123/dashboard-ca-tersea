@@ -245,7 +245,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <p>Import des extractions, grille tarifaire modifiable, calcul du CA par site et par activité</p>
     <p id="logged-user" style="margin-top:6px;font-size:11px;opacity:.75;"></p>
     <p id="db-status" style="margin-top:2px;font-size:11px;opacity:.75;">Base de données : connexion…</p>
-    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r4 (filtres Site/Agent Reporting)</p>
+    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r6 (filtre Période Reporting)</p>
   </div>
 </header>
 
@@ -553,7 +553,25 @@ if(sessionStorage.getItem('dashca_auth_user')){
   <section class="panel" id="panel-reporting">
     <div class="section-title">Reporting — indicateurs du glossaire KPI</div>
     <div class="footnote" style="margin-bottom:10px;">
-      Calculé à partir des fichiers chargés dans l'onglet Import (entrants/sortants/mails pour le CA et les actes, RTT pour les heures de log/disponibilité/retrait/panier/pause/brief). Couvre l'intégralité des données chargées (pas de filtre de période ici — voir l'onglet Dashboard pour une période précise). Taux d'occupation et Taux de transfert restent à "—" : la donnée source n'est pas encore disponible (voir l'onglet Glossaire KPI).
+      Calculé à partir des fichiers chargés dans l'onglet Import (entrants/sortants/mails pour le CA et les actes, RTT pour les heures de log/disponibilité/retrait/panier/pause/brief). Utilisez le filtre Période ci-dessous pour restreindre à un jour, une semaine, un mois ou une plage personnalisée. Taux d'occupation et Taux de transfert restent à "—" : la donnée source n'est pas encore disponible (voir l'onglet Glossaire KPI).
+    </div>
+    <div class="row-actions" style="margin-bottom:10px;gap:14px;align-items:center;">
+      <label style="font-size:12.5px;">Période
+        <select id="reporting-period-mode" style="width:150px;display:inline-block;" onchange="onReportingPeriodModeChange()">
+          <option value="all">Toute la période</option>
+          <option value="day">Jour</option>
+          <option value="week">Semaine</option>
+          <option value="month">Mois</option>
+          <option value="custom">Personnalisée</option>
+        </select>
+      </label>
+      <label style="font-size:12.5px;display:none;" id="reporting-ref-date-label">Date de référence
+        <input type="date" id="reporting-ref-date" style="width:150px;display:inline-block;" onchange="onReportingRefDateChange()">
+      </label>
+      <label style="font-size:12.5px;display:none;" id="reporting-custom-range-label">Du
+        <input type="date" id="reporting-date-start" style="width:150px;display:inline-block;" onchange="refreshAgentReporting()">
+        Au <input type="date" id="reporting-date-end" style="width:150px;display:inline-block;" onchange="refreshAgentReporting()">
+      </label>
     </div>
     <div class="footnote" id="reporting-coverage" style="margin-bottom:12px;font-weight:600;"></div>
     <div class="row-actions view-toggle" style="margin-bottom:10px;">
@@ -628,6 +646,7 @@ const state = {
   files:{ entrants:null, sortants:null, mails:null, repartition:null, flux:null, rtt:null },
   raw:{ entrants:[], sortants:[], mails:[], rtt:[] },
   agentCaStats:{},
+  agentCaStatsByDate:{}, // clé "AGENTKEY|YYYY-MM-DD" -> stats du jour (permet de filtrer le Reporting par période sans re-parser les fichiers)
   lotUnique:[], sav:[], fluxMap:[],
   tarifs:[],
   dmtFormula:'',
@@ -1049,7 +1068,13 @@ async function clearAllFiles(){
   state.files = {entrants:null, sortants:null, mails:null, repartition:null, flux:null, rtt:null};
   state.results = [];
   state.agentCaStats = {};
+  state.agentCaStatsByDate = {};
   state.dmt = {global:null, bysite:{}};
+  document.getElementById('reporting-period-mode').value = 'all';
+  document.getElementById('reporting-ref-date-label').style.display = 'none';
+  document.getElementById('reporting-custom-range-label').style.display = 'none';
+  document.getElementById('reporting-date-start').value = '';
+  document.getElementById('reporting-date-end').value = '';
   refreshAgentReporting();
   ['entrants','sortants','mails','repartition','flux','json','rtt'].forEach(k=>{
     document.getElementById('dz-'+k).classList.remove('ok');
@@ -1061,7 +1086,7 @@ async function clearAllFiles(){
     await storage.set('last_results', '');
     await storage.set('last_dmt', '');
     await storage.set('last_meta', '');
-    await storage.set('agent_ca_stats', '');
+    await storage.set('agent_ca_stats_by_date', '');
     await storage.set('raw_rtt', '');
   }catch(e){}
   renderDashboard();
@@ -1197,8 +1222,9 @@ async function runCalculationAsync(){
   document.getElementById('calc-status').textContent = '✓ Calcul effectué — voir l\'onglet Dashboard';
 
   // Reporting (Vue Agent / Vue Activité) : CA + actes par agent, dérivés des mêmes lignes que le calcul
-  // ci-dessus (garantit que la somme par agent retombe exactement sur le CA total du Dashboard).
-  state.agentCaStats = computeAgentCaStats(rows);
+  // ci-dessus (garantit que la somme par agent retombe exactement sur le CA total du Dashboard),
+  // mais conservés par jour pour permettre le filtre Jour/Semaine/Mois/Période propre au Reporting.
+  state.agentCaStatsByDate = computeAgentCaStatsByDate(rows);
   refreshAgentReporting();
 
   const dates = state.results.map(r=>r.date).filter(Boolean).sort();
@@ -1227,7 +1253,7 @@ async function runCalculationAsync(){
     // Sauvegarde des données du Reporting (Vue Agent / Vue Activité) : sans cela, l'onglet
     // Reporting redevenait vide à chaque réouverture du dashboard car ces données n'étaient
     // gardées qu'en mémoire (contrairement au CA total qui, lui, était bien sauvegardé).
-    await storage.set('agent_ca_stats', JSON.stringify(state.agentCaStats));
+    await storage.set('agent_ca_stats_by_date', JSON.stringify(state.agentCaStatsByDate));
     await storage.set('raw_rtt', JSON.stringify(state.raw.rtt));
     log('Données sauvegardées — seront rechargées automatiquement à la prochaine ouverture.', 'ok');
   }catch(e){ log('Avertissement : sauvegarde des données impossible ('+e.message+').', 'err'); }
@@ -1511,15 +1537,19 @@ function exportCsv(){
      donnée source nécessaire n'est pas dans l'export RTT actuel (voir
      l'onglet Glossaire KPI) — ils s'affichent à "—".
 ========================================================================= */
-function computeAgentCaStats(rows){
+// Agrège le CA/actes par agent ET par jour (au lieu d'un seul total par agent) : cela permet
+// ensuite de filtrer le Reporting par Jour/Semaine/Mois/Période sans avoir à re-parcourir les
+// fichiers entrants/sortants/mails à chaque changement de filtre, et sans perdre ce détail
+// quotidien après un rechargement de la page (voir sumAgentCaStatsForRange ci-dessous).
+function computeAgentCaStatsByDate(rows){
   const stats = {};
   rows.forEach(r=>{
     if(!r.agent) return;
-    const k = normKey(r.agent);
-    if(!stats[k]) stats[k] = {agent:String(r.agent).trim(), site:r.site, activite:r.activite,
+    const dk = dateKey(r.date);
+    const k = normKey(r.agent)+'|'+dk;
+    if(!stats[k]) stats[k] = {agent:String(r.agent).trim(), site:r.site, activite:r.activite, date:dk,
       entrants:0, sortants:0, mails:0, ca:0, meaSum:0, acwSum:0};
     const s = stats[k];
-    const dk = dateKey(r.date);
     const ferie = isFerieDay(dk);
     const siteDmt = state.dmt.bysite[r.site];
     const price = priceFor(r.site, r.activite, r.type, siteDmt, ferie);
@@ -1531,7 +1561,24 @@ function computeAgentCaStats(rows){
   return stats;
 }
 
-function computeRttStats(){
+// Ré-agrège les totaux par agent (même forme que l'ancien computeAgentCaStats) en ne sommant que
+// les jours compris dans [ds, de] ; ds/de vides = toute la période chargée.
+function sumAgentCaStatsForRange(byDate, ds, de){
+  const stats = {};
+  Object.values(byDate).forEach(d=>{
+    if(ds && d.date < ds) return;
+    if(de && d.date > de) return;
+    const k = normKey(d.agent);
+    if(!stats[k]) stats[k] = {agent:d.agent, site:d.site, activite:d.activite,
+      entrants:0, sortants:0, mails:0, ca:0, meaSum:0, acwSum:0};
+    const s = stats[k];
+    s.entrants += d.entrants; s.sortants += d.sortants; s.mails += d.mails; s.ca += d.ca;
+    s.meaSum += d.meaSum; s.acwSum += d.acwSum;
+  });
+  return stats;
+}
+
+function computeRttStats(ds, de){
   const stats = {};
   if(!state.raw.rtt.length) return stats;
   const maps = buildMaps();
@@ -1543,9 +1590,15 @@ function computeRttStats(){
   const panierCol = findCol(sample, ['Panier']);
   const pauseCol = findCol(sample, ['Pause cafe']);
   const briefCol = findCol(sample, ['Brief']);
+  const dateCol = findCol(sample, ['Date locale','Date']);
   state.raw.rtt.forEach(r=>{
     const agentName = r[agentCol];
     if(!agentName) return;
+    if(dateCol && (ds || de)){
+      const dk = dateKey(parseDate(r[dateCol]));
+      if(ds && (!dk || dk < ds)) return;
+      if(de && (!dk || dk > de)) return;
+    }
     const k = normKey(agentName);
     if(!stats[k]){
       const {site, act} = classifyAgent(agentName, maps);
@@ -1644,9 +1697,51 @@ function fmtEURorDash(x){ return x==null ? '—' : fmtEUR(x); }
 
 let lastReportingMerged = [];
 function refreshAgentReporting(){
-  const rttStats = computeRttStats();
+  const ds = document.getElementById('reporting-date-start') ? document.getElementById('reporting-date-start').value : '';
+  const de = document.getElementById('reporting-date-end') ? document.getElementById('reporting-date-end').value : '';
+  state.agentCaStats = sumAgentCaStatsForRange(state.agentCaStatsByDate||{}, ds, de);
+  const rttStats = computeRttStats(ds, de);
   lastReportingMerged = mergeAgentStats(state.agentCaStats||{}, rttStats);
   renderReporting();
+}
+
+// Filtre Jour/Semaine/Mois/Personnalisée/Toute la période, propre à l'onglet Reporting (indépendant
+// du filtre de l'onglet Dashboard) — même logique de calcul de plage que celle du Dashboard.
+function onReportingPeriodModeChange(){
+  const mode = document.getElementById('reporting-period-mode').value;
+  document.getElementById('reporting-ref-date-label').style.display = (mode==='day'||mode==='week'||mode==='month') ? 'inline-block' : 'none';
+  document.getElementById('reporting-custom-range-label').style.display = (mode==='custom') ? 'inline-block' : 'none';
+  if(mode==='all'){
+    document.getElementById('reporting-date-start').value = '';
+    document.getElementById('reporting-date-end').value = '';
+    refreshAgentReporting();
+  } else if(mode==='custom'){
+    refreshAgentReporting();
+  } else {
+    applyReportingPeriodFromRef();
+  }
+}
+function onReportingRefDateChange(){ applyReportingPeriodFromRef(); }
+function applyReportingPeriodFromRef(){
+  const mode = document.getElementById('reporting-period-mode').value;
+  const refStr = document.getElementById('reporting-ref-date').value;
+  if(!refStr) return;
+  const ref = new Date(refStr+'T00:00:00');
+  let start, end;
+  if(mode==='day'){
+    start = end = ref;
+  } else if(mode==='week'){
+    const dow = ref.getDay(); // 0=dimanche
+    const diffToMonday = (dow===0) ? -6 : (1-dow);
+    start = new Date(ref); start.setDate(ref.getDate()+diffToMonday);
+    end = new Date(start); end.setDate(start.getDate()+6);
+  } else if(mode==='month'){
+    start = new Date(ref.getFullYear(), ref.getMonth(), 1);
+    end = new Date(ref.getFullYear(), ref.getMonth()+1, 0);
+  } else { return; }
+  document.getElementById('reporting-date-start').value = dateKey(start);
+  document.getElementById('reporting-date-end').value = dateKey(end);
+  refreshAgentReporting();
 }
 
 let reportingView = 'agent';
@@ -1655,6 +1750,10 @@ function setReportingView(v){
   document.querySelectorAll('#panel-reporting .view-toggle button').forEach(b=>{
     b.classList.toggle('secondary', b.dataset.view!==v);
   });
+  // Les colonnes changent d'une vue à l'autre (ex. "Nb agents" n'existe qu'en vue Activité) :
+  // on réinitialise le tri pour éviter de trier sur une colonne qui n'existe plus.
+  reportingSortKey = null;
+  reportingSortDir = 'desc';
   renderReporting();
 }
 
@@ -1664,18 +1763,64 @@ function resetReportingFilters(){
   renderReporting();
 }
 
+// Tri croissant/décroissant sur les colonnes du tableau Reporting (Vue Agent et Vue Activité).
+// Un clic sur une colonne texte (agent/site/activité) trie par défaut en A→Z ; sur une colonne
+// numérique (CA, actes, taux...), en décroissant (valeurs les plus fortes en premier). Un second
+// clic sur la même colonne inverse le sens.
+let reportingSortKey = null;
+let reportingSortDir = 'desc';
+const REPORTING_TEXT_COLS = new Set(['agent','site','activite']);
+function sortReportingBy(key){
+  if(reportingSortKey === key){
+    reportingSortDir = (reportingSortDir === 'asc') ? 'desc' : 'asc';
+  } else {
+    reportingSortKey = key;
+    reportingSortDir = REPORTING_TEXT_COLS.has(key) ? 'asc' : 'desc';
+  }
+  renderReporting();
+}
+function sortReportingRows(rows, key, dir){
+  if(!key) return rows;
+  const sign = dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a,b)=>{
+    const va = a[key], vb = b[key];
+    const na = (va===null || va===undefined || va==='');
+    const nb = (vb===null || vb===undefined || vb==='');
+    if(na && nb) return 0;
+    if(na) return 1;  // valeurs manquantes ("Non identifié", "—") toujours en fin de liste
+    if(nb) return -1;
+    if(typeof va === 'string' || typeof vb === 'string'){
+      return sign * String(va).localeCompare(String(vb), 'fr', {sensitivity:'base'});
+    }
+    return sign * (va - vb);
+  });
+}
+
+function reportingPeriodLabel(){
+  const ds = document.getElementById('reporting-date-start').value;
+  const de = document.getElementById('reporting-date-end').value;
+  if(!ds && !de) return 'toute la période chargée';
+  const fmt = d => d ? new Date(d+'T00:00:00').toLocaleDateString('fr-FR') : '…';
+  if(ds && de && ds === de) return 'le '+fmt(ds);
+  return 'du '+fmt(ds||'…')+' au '+fmt(de||'…');
+}
+
 function renderReporting(){
   const empty = document.getElementById('reporting-empty');
   const wrap = document.getElementById('reporting-wrap');
+  const hasAnyData = Object.keys(state.agentCaStatsByDate||{}).length>0 || state.raw.rtt.length>0;
   if(!lastReportingMerged.length){
     empty.style.display='block'; wrap.style.display='none';
+    empty.textContent = hasAnyData
+      ? 'Aucune donnée pour la période sélectionnée ('+reportingPeriodLabel()+'). Essayez "Toute la période" ou une autre plage dans le filtre Période ci-dessus.'
+      : 'Aucune donnée pour le moment. Chargez les fichiers dans l\'onglet "1. Import" (entrants/sortants/mails + RTT, ou le JSON consolidé) puis lancez le calcul.';
     return;
   }
   empty.style.display='none'; wrap.style.display='block';
 
   const nbRtt = lastReportingMerged.filter(m=>m.hasRtt).length;
   const nbCa = lastReportingMerged.filter(m=>m.hasCa).length;
-  let coverageTxt = lastReportingMerged.length+' agents au total — '+nbRtt+' avec données RTT (heures de log/disponibilité/retrait...)'+
+  let coverageTxt = 'Période : '+reportingPeriodLabel()+' — '+lastReportingMerged.length+' agents au total — '+nbRtt+' avec données RTT (heures de log/disponibilité/retrait...)'+
     (nbRtt < lastReportingMerged.length ? ', '+(lastReportingMerged.length-nbRtt)+' sans (importer le fichier RTT pour les compléter)' : '');
   if(nbCa === 0){
     coverageTxt += ' — ⚠️ CA/actes non calculés : cliquez sur "▶ Lancer le calcul" dans l\'onglet Import (avec entrants/sortants/mails chargés) pour les obtenir.';
@@ -1684,12 +1829,31 @@ function renderReporting(){
   }
   document.getElementById('reporting-coverage').textContent = coverageTxt;
 
-  const theadAgent = ['Agent','Site','Activité','Actes traités','Appels entrants','Appels sortants','Mails traités',
-    'MEA moy.','ACW moy.','CA (€)','Heures de log','CA/H (€)','Prod/H','Temps de dispo','Taux de retrait',
-    'Taux panier','Taux Pause','Taux brief'];
-  const theadActivite = ['Site','Activité','Nb agents','Actes traités','Appels entrants','Appels sortants',
-    'Mails traités','MEA moy.','ACW moy.','CA (€)','Heures de log','CA/H (€)','Prod/H','Temps de dispo',
-    'Taux de retrait','Taux panier','Taux Pause','Taux brief'];
+  const colsAgent = [
+    {label:'Agent',key:'agent'},{label:'Site',key:'site'},{label:'Activité',key:'activite'},
+    {label:'Actes traités',key:'actes'},{label:'Appels entrants',key:'entrants'},{label:'Appels sortants',key:'sortants'},
+    {label:'Mails traités',key:'mails'},{label:'MEA moy.',key:'meaMoy'},{label:'ACW moy.',key:'acwMoy'},
+    {label:'CA (€)',key:'ca'},{label:'Heures de log',key:'heuresLog'},{label:'CA/H (€)',key:'caParHeure'},
+    {label:'Prod/H',key:'prodParHeure'},{label:'Temps de dispo',key:'tauxDispo'},{label:'Taux de retrait',key:'tauxRetrait'},
+    {label:'Taux panier',key:'tauxPanier'},{label:'Taux Pause',key:'tauxPause'},{label:'Taux brief',key:'tauxBrief'}
+  ];
+  const colsActivite = [
+    {label:'Site',key:'site'},{label:'Activité',key:'activite'},{label:'Nb agents',key:'nbAgents'},
+    {label:'Actes traités',key:'actes'},{label:'Appels entrants',key:'entrants'},{label:'Appels sortants',key:'sortants'},
+    {label:'Mails traités',key:'mails'},{label:'MEA moy.',key:'meaMoy'},{label:'ACW moy.',key:'acwMoy'},
+    {label:'CA (€)',key:'ca'},{label:'Heures de log',key:'heuresLog'},{label:'CA/H (€)',key:'caParHeure'},
+    {label:'Prod/H',key:'prodParHeure'},{label:'Temps de dispo',key:'tauxDispo'},{label:'Taux de retrait',key:'tauxRetrait'},
+    {label:'Taux panier',key:'tauxPanier'},{label:'Taux Pause',key:'tauxPause'},{label:'Taux brief',key:'tauxBrief'}
+  ];
+
+  function theadHtml(cols){
+    return '<tr>'+cols.map(c=>{
+      const active = reportingSortKey === c.key;
+      const arrow = active ? (reportingSortDir==='asc' ? ' ▲' : ' ▼') : ' ⇅';
+      return '<th onclick="sortReportingBy(\''+c.key+'\')" style="cursor:pointer;user-select:none;white-space:nowrap;">'
+        +c.label+'<span style="opacity:'+(active?'1':'.35')+';font-size:10px;">'+arrow+'</span></th>';
+    }).join('')+'</tr>';
+  }
 
   const thead = document.getElementById('reporting-thead');
   const tbody = document.getElementById('reporting-tbody');
@@ -1700,7 +1864,7 @@ function renderReporting(){
 
   if(reportingView === 'agent'){
     filterBar.style.display = 'flex';
-    thead.innerHTML = '<tr>'+theadAgent.map(h=>'<th>'+h+'</th>').join('')+'</tr>';
+    thead.innerHTML = theadHtml(colsAgent);
 
     // Filtre Site : options reconstruites à partir des données courantes, en gardant la sélection en cours si possible.
     const siteSel = document.getElementById('reporting-filter-site');
@@ -1713,11 +1877,12 @@ function renderReporting(){
     const agentFilterRaw = (document.getElementById('reporting-filter-agent').value||'').trim();
     const agentFilter = normKey(agentFilterRaw);
 
-    const filtered = lastReportingMerged.filter(m=>{
+    let filtered = lastReportingMerged.filter(m=>{
       if(siteFilter && (m.site||'Non identifié') !== siteFilter) return false;
       if(agentFilter && !normKey(m.agent||'').includes(agentFilter)) return false;
       return true;
     });
+    filtered = sortReportingRows(filtered, reportingSortKey, reportingSortDir);
 
     countLabel.textContent = (siteFilter || agentFilter)
       ? filtered.length+' agent(s) affiché(s) sur '+lastReportingMerged.length
@@ -1738,8 +1903,9 @@ function renderReporting(){
   } else {
     filterBar.style.display = 'none';
     countLabel.textContent = '';
-    const groups = groupByActivite(lastReportingMerged);
-    thead.innerHTML = '<tr>'+theadActivite.map(h=>'<th>'+h+'</th>').join('')+'</tr>';
+    let groups = groupByActivite(lastReportingMerged);
+    groups = sortReportingRows(groups, reportingSortKey, reportingSortDir);
+    thead.innerHTML = theadHtml(colsActivite);
     groups.forEach(g=>{
       const tr = document.createElement('tr');
       if(g.site==='Non identifié') tr.style.opacity = '0.6';
@@ -2293,8 +2459,8 @@ async function loadPersisted(){
   // (calculés lors du dernier "Lancer le calcul") + RTT brut, pour que l'onglet Reporting
   // ne soit plus vide à la réouverture du dashboard.
   try{
-    const acs = await storage.get('agent_ca_stats');
-    state.agentCaStats = acs ? JSON.parse(acs.value) : {};
+    const acs = await storage.get('agent_ca_stats_by_date');
+    state.agentCaStatsByDate = acs ? JSON.parse(acs.value) : {};
     const rtt = await storage.get('raw_rtt');
     state.raw.rtt = rtt ? JSON.parse(rtt.value) : [];
     if(state.raw.rtt.length){
