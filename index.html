@@ -897,6 +897,17 @@ function downloadJsonTemplate(){
 /* =========================================================================
    INIT DROPZONES
 ========================================================================= */
+// Recalcule automatiquement dès qu'au moins un fichier d'actes (entrants/sortants/mails)
+// est chargé, pour que le CA/les actes du Reporting n'exigent jamais un clic manuel sur
+// "Lancer le calcul" — quel que soit le mode d'import (JSON ou fichiers Excel un par un).
+function maybeAutoCalc(){
+  if(state.raw.entrants.length || state.raw.sortants.length || state.raw.mails.length){
+    log('Recalcul automatique en cours…', 'ok');
+    runCalculation();
+  } else {
+    refreshAgentReporting();
+  }
+}
 setupDropzone('dz-entrants','f-entrants',(res,file)=>{
   const sheet = res.sheets[res.sheetNames[0]];
   state.raw.entrants = sheet;
@@ -904,6 +915,7 @@ setupDropzone('dz-entrants','f-entrants',(res,file)=>{
   document.getElementById('dz-entrants').classList.add('ok');
   document.getElementById('st-entrants').textContent = file.name+' — '+sheet.length+' lignes';
   log('Appels entrants chargés : '+sheet.length+' lignes', 'ok');
+  maybeAutoCalc();
 });
 setupDropzone('dz-sortants','f-sortants',(res,file)=>{
   const sheet = res.sheets[res.sheetNames[0]];
@@ -912,6 +924,7 @@ setupDropzone('dz-sortants','f-sortants',(res,file)=>{
   document.getElementById('dz-sortants').classList.add('ok');
   document.getElementById('st-sortants').textContent = file.name+' — '+sheet.length+' lignes';
   log('Appels sortants chargés : '+sheet.length+' lignes', 'ok');
+  maybeAutoCalc();
 });
 setupDropzone('dz-mails','f-mails',(res,file)=>{
   const sheet = res.sheets[res.sheetNames[0]];
@@ -920,6 +933,7 @@ setupDropzone('dz-mails','f-mails',(res,file)=>{
   document.getElementById('dz-mails').classList.add('ok');
   document.getElementById('st-mails').textContent = file.name+' — '+sheet.length+' lignes';
   log('Mails chargés : '+sheet.length+' lignes', 'ok');
+  maybeAutoCalc();
 });
 setupJsonDropzone('dz-json','f-json',(data,file)=>{
   let parts = [];
@@ -1015,8 +1029,8 @@ setupDropzone('dz-rtt','f-rtt',(res,file)=>{
   document.getElementById('dz-rtt').classList.add('ok');
   document.getElementById('st-rtt').textContent = file.name+' — '+sheet.length+' lignes';
   log('RTT chargé : '+sheet.length+' lignes', 'ok');
-  refreshAgentReporting();
   storage.set('raw_rtt', JSON.stringify(state.raw.rtt)).catch(()=>{});
+  maybeAutoCalc();
 });
 
 async function clearAllFiles(){
