@@ -246,7 +246,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <p>Import des extractions, grille tarifaire modifiable, calcul du CA par site et par activité</p>
     <p id="logged-user" style="margin-top:6px;font-size:11px;opacity:.75;"></p>
     <p id="db-status" style="margin-top:2px;font-size:11px;opacity:.75;">Base de données : connexion…</p>
-    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r8 (agents hors répartition équipes ignorés partout)</p>
+    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r9 (CA/H et Prod/H Vue Agent : dimanche neutralisé)</p>
   </div>
 </header>
 
@@ -1302,6 +1302,13 @@ function isFerieDay(dateKeyStr){
   const [y,m,d] = dateKeyStr.split('-').map(Number);
   return new Date(y, m-1, d).getDay() === 0;
 }
+// Utilisé uniquement pour neutraliser la production du dimanche dans le calcul de CA/H et Prod/H
+// de l'onglet Reporting (Vue Agent) — indépendant de isFerieDay (qui sert au tarif Actes/CA).
+function isSunday(dateKeyStr){
+  if(!dateKeyStr) return false;
+  const [y,m,d] = dateKeyStr.split('-').map(Number);
+  return new Date(y, m-1, d).getDay() === 0;
+}
 function priceFor(site, activite, type, siteDmtSec, isFerie){
   if(type === 'Appels sortants' && state.dmtFormula && state.dmtFormula.trim()){
     const dmtSec = siteDmtSec != null ? siteDmtSec : state.dmt.global;
@@ -1587,6 +1594,9 @@ function computeAgentCaStatsByDate(rows){
 
 // Ré-agrège les totaux par agent (même forme que l'ancien computeAgentCaStats) en ne sommant que
 // les jours compris dans [ds, de] ; ds/de vides = toute la période chargée.
+// Calcule en plus des totaux "HD" (hors dimanche) : entrantsHD/sortantsHD/mailsHD/caHD, utilisés
+// uniquement pour neutraliser la production du dimanche dans le calcul de CA/H et Prod/H de la
+// Vue Agent (les colonnes Actes traités / CA (€) restent, elles, calculées sur tous les jours).
 function sumAgentCaStatsForRange(byDate, ds, de){
   const stats = {};
   Object.values(byDate).forEach(d=>{
@@ -1594,10 +1604,14 @@ function sumAgentCaStatsForRange(byDate, ds, de){
     if(de && d.date > de) return;
     const k = normKey(d.agent);
     if(!stats[k]) stats[k] = {agent:d.agent, site:d.site, activite:d.activite,
-      entrants:0, sortants:0, mails:0, ca:0, meaSum:0, acwSum:0};
+      entrants:0, sortants:0, mails:0, ca:0, meaSum:0, acwSum:0,
+      entrantsHD:0, sortantsHD:0, mailsHD:0, caHD:0};
     const s = stats[k];
     s.entrants += d.entrants; s.sortants += d.sortants; s.mails += d.mails; s.ca += d.ca;
     s.meaSum += d.meaSum; s.acwSum += d.acwSum;
+    if(!isSunday(d.date)){
+      s.entrantsHD += d.entrants; s.sortantsHD += d.sortants; s.mailsHD += d.mails; s.caHD += d.ca;
+    }
   });
   return stats;
 }
@@ -1618,8 +1632,8 @@ function computeRttStats(ds, de){
   state.raw.rtt.forEach(r=>{
     const agentName = r[agentCol];
     if(!agentName) return;
-    if(dateCol && (ds || de)){
-      const dk = dateKey(parseDate(r[dateCol]));
+    const dk = dateCol ? dateKey(parseDate(r[dateCol])) : null;
+    if(ds || de){
       if(ds && (!dk || dk < ds)) return;
       if(de && (!dk || dk > de)) return;
     }
@@ -1628,10 +1642,12 @@ function computeRttStats(ds, de){
       const {site, act} = classifyAgent(agentName, maps);
       if(!site) return; // agent absent de la répartition des équipes partagée -> ignoré (consigne utilisateur)
       stats[k] = {agent:String(agentName).trim(), site, activite:act,
-        heuresLogSec:0, dispoSec:0, retraitSec:0, panierSec:0, pauseSec:0, briefSec:0, jours:0};
+        heuresLogSec:0, heuresLogSecHD:0, dispoSec:0, retraitSec:0, panierSec:0, pauseSec:0, briefSec:0, jours:0};
     }
     const s = stats[k];
-    s.heuresLogSec += Number(r[connCol])||0;
+    const conn = Number(r[connCol])||0;
+    s.heuresLogSec += conn;
+    if(!isSunday(dk)) s.heuresLogSecHD += conn; // neutralise le dimanche pour CA/H et Prod/H (Vue Agent)
     s.dispoSec += Number(r[dispoCol])||0;
     s.retraitSec += Number(r[retraitCol])||0;
     s.panierSec += Number(r[panierCol])||0;
@@ -1667,11 +1683,18 @@ function mergeAgentStats(caStats, rttStats){
     const ca = c?c.ca:0;
     const heuresLogSec = r?r.heuresLogSec:0;
     const heuresLog = heuresLogSec/3600;
+    // CA/H et Prod/H (Vue Agent) neutralisent la production du dimanche : numérateur et
+    // dénominateur utilisent uniquement les jours hors dimanche, pour ne pas déformer ces deux
+    // ratios. Les colonnes Actes traités / CA (€) / Heures de log restent, elles, sur tous les jours.
+    const actesHD = c ? (c.entrantsHD||0)+(c.sortantsHD||0)+(c.mailsHD||0) : 0;
+    const caHD = c ? (c.caHD||0) : 0;
+    const heuresLogSecHD = r ? (r.heuresLogSecHD||0) : 0;
+    const heuresLogHD = heuresLogSecHD/3600;
     merged.push({
       agent, site, activite,
       entrants, sortants, mails, actes, ca,
-      caParHeure: heuresLog>0 ? ca/heuresLog : null,
-      prodParHeure: heuresLog>0 ? actes/heuresLog : null,
+      caParHeure: heuresLogHD>0 ? caHD/heuresLogHD : null,
+      prodParHeure: heuresLogHD>0 ? actesHD/heuresLogHD : null,
       meaMoy: c && entrants>0 ? c.meaSum/entrants : null,
       acwMoy: c && (entrants+sortants)>0 ? c.acwSum/(entrants+sortants) : null,
       heuresLogSec, heuresLog: r ? heuresLog : null,
@@ -1870,8 +1893,8 @@ function renderReporting(){
     {label:'Agent',key:'agent'},{label:'Site',key:'site'},{label:'Activité',key:'activite'},
     {label:'Actes traités',key:'actes'},{label:'Appels entrants',key:'entrants'},{label:'Appels sortants',key:'sortants'},
     {label:'Mails traités',key:'mails'},{label:'MEA moy.',key:'meaMoy'},{label:'ACW moy.',key:'acwMoy'},
-    {label:'CA (€)',key:'ca'},{label:'Heures de log',key:'heuresLog'},{label:'CA/H (€)',key:'caParHeure'},
-    {label:'Prod/H',key:'prodParHeure'},{label:'Temps de dispo',key:'tauxDispo'},{label:'Taux de retrait',key:'tauxRetrait'},
+    {label:'CA (€)',key:'ca'},{label:'Heures de log',key:'heuresLog'},{label:'CA/H (€) (hors dim.)',key:'caParHeure'},
+    {label:'Prod/H (hors dim.)',key:'prodParHeure'},{label:'Temps de dispo',key:'tauxDispo'},{label:'Taux de retrait',key:'tauxRetrait'},
     {label:'Taux panier',key:'tauxPanier'},{label:'Taux Pause',key:'tauxPause'},{label:'Taux brief',key:'tauxBrief'}
   ];
   const colsActivite = [
