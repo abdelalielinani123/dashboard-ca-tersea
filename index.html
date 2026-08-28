@@ -104,7 +104,8 @@ section.panel.active{display:block;}
 .grid{display:grid;gap:16px;}
 .cols-3{grid-template-columns:repeat(3,1fr);}
 .cols-2{grid-template-columns:repeat(2,1fr);}
-@media (max-width:900px){.cols-3,.cols-2{grid-template-columns:1fr;}}
+.cols-4{grid-template-columns:repeat(4,1fr);}
+@media (max-width:900px){.cols-3,.cols-2,.cols-4{grid-template-columns:1fr;}}
 
 .card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:18px 20px;}
 .card h3{margin:0 0 4px;font-size:14px;color:var(--navy-2);}
@@ -245,7 +246,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <p>Import des extractions, grille tarifaire modifiable, calcul du CA par site et par activité</p>
     <p id="logged-user" style="margin-top:6px;font-size:11px;opacity:.75;"></p>
     <p id="db-status" style="margin-top:2px;font-size:11px;opacity:.75;">Base de données : connexion…</p>
-    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r6 (filtre Période Reporting)</p>
+    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r8 (agents hors répartition équipes ignorés partout)</p>
   </div>
 </header>
 
@@ -480,6 +481,14 @@ if(sessionStorage.getItem('dashca_auth_user')){
             <option value="Barcelone">Barcelone</option>
           </select>
         </label>
+        <label style="font-size:12.5px;">Site
+          <select id="filter-site" style="width:140px;display:inline-block;">
+            <option value="">Tous</option>
+            <option value="Mada">Mada</option>
+            <option value="Fès">Fès</option>
+            <option value="Casablanca">Casablanca</option>
+          </select>
+        </label>
         <button class="btn small" onclick="renderDashboard()">Appliquer</button>
         <button class="btn small secondary" onclick="exportCsv()">Exporter le détail (CSV)</button>
         <button class="btn small" style="background:var(--green);" onclick="archiveCurrentView()">📦 Archiver cette vue</button>
@@ -503,8 +512,9 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <div id="dashboard-empty" class="empty">Importez les fichiers et lancez le calcul depuis l'onglet "1. Import" pour afficher le dashboard.</div>
 
     <div id="dashboard-content" style="display:none;">
-      <div class="grid cols-3" style="margin-top:18px;">
+      <div class="grid cols-4" style="margin-top:18px;">
         <div class="kpi"><div class="lbl">CA total</div><div class="val" id="kpi-ca">—</div><div class="sub" id="kpi-ca-sub"></div></div>
+        <div class="kpi"><div class="lbl">CA/H</div><div class="val" id="kpi-ca-h">—</div><div class="sub" id="kpi-ca-h-sub">CA total ÷ heures de log (fichier RTT)</div></div>
         <div class="kpi"><div class="lbl">Actes facturables</div><div class="val" id="kpi-actes">—</div><div class="sub" id="kpi-actes-sub"></div></div>
         <div class="kpi"><div class="lbl">DMT sortant</div><div class="val" id="kpi-dmt">—</div><div class="sub" id="kpi-dmt-sub"></div></div>
       </div>
@@ -1401,8 +1411,10 @@ function renderDashboard(){
   const ds = document.getElementById('date-start').value;
   const de = document.getElementById('date-end').value;
   const activiteFilter = document.getElementById('filter-activite').value;
+  const siteFilter = document.getElementById('filter-site').value;
   let filtered = state.results.filter(r=> (!ds || r.date>=ds) && (!de || r.date<=de));
   if(activiteFilter) filtered = filtered.filter(r=> r.activite === activiteFilter);
+  if(siteFilter) filtered = filtered.filter(r=> r.site === siteFilter);
 
   // Heures Barcelone : saisie manuelle par jour ET par site, sommée sur la période affichée
   renderBarceloneDaysTable();
@@ -1410,6 +1422,7 @@ function renderDashboard(){
   const barceloneBySite = {};
   let heuresBarcelone = 0, caBarcelone = 0;
   BARCELONE_SITES.forEach(site=>{
+    if(siteFilter && site !== siteFilter) return;
     const h = datesInRange.reduce((sum,d)=> sum + (state.barceloneHeures[barceloneKey(d,site)]||0), 0);
     if(h > 0){
       barceloneBySite[site] = h;
@@ -1464,7 +1477,17 @@ function renderDashboard(){
   document.getElementById('kpi-ca').textContent = fmtEUR(totalCA);
   document.getElementById('kpi-ca-sub').textContent = ds && de ? ('Période '+ds+' → '+de) : '';
   document.getElementById('kpi-actes').textContent = fmtNum(totalQty);
-  document.getElementById('kpi-actes-sub').textContent = filtered.length+' combinaisons site/activité/type'+(activiteFilter?' (filtre : '+activiteFilter+')':'');
+  document.getElementById('kpi-actes-sub').textContent = filtered.length+' combinaisons site/activité/type'+
+    (activiteFilter?' (activité : '+activiteFilter+')':'')+(siteFilter?' (site : '+siteFilter+')':'');
+
+  // CA/H = CA total (période/activité/site filtrés) ÷ heures de log (fichier RTT, mêmes filtres) —
+  // même principe que le CA/H de l'onglet Reporting, ici agrégé sur toute la sélection du Dashboard.
+  const heuresLogSec = sumHeuresLogSecForFilter(ds, de, siteFilter);
+  const heuresLog = heuresLogSec/3600;
+  document.getElementById('kpi-ca-h').textContent = heuresLog>0 ? fmtEUR(totalCA/heuresLog) : '—';
+  document.getElementById('kpi-ca-h-sub').textContent = heuresLog>0
+    ? fmtNum(Math.round(heuresLog))+' h de log (RTT)'
+    : 'Chargez le fichier RTT pour activer ce calcul';
   document.getElementById('kpi-dmt').textContent = state.dmt.global ? fmtDuree(state.dmt.global) : '—';
   document.getElementById('kpi-dmt-sub').textContent = state.dmtFormula.trim() ? 'Formule active pour le tarif sortant' : 'Tarif sortant = grille fixe';
   const excludeShort = document.getElementById('opt-exclude-short').checked;
@@ -1530,9 +1553,10 @@ function exportCsv(){
      total affiché dans le Dashboard (aucun recalcul divergent).
    - Les indicateurs de connexion (heures de log, disponibilité, retrait,
      panier, pause, brief) viennent du fichier RTT, agrégé par agent
-     indépendamment (un agent peut apparaître dans le RTT sans encore être
-     reconnu par la Répartition d'équipes -> il reste visible, avec
-     Site/Activité = "Non identifié", pour ne rien cacher).
+     indépendamment. Un agent absent de la Répartition d'équipes partagée
+     est ignoré partout (CA, actes, heures de log) : consigne explicite de
+     l'utilisateur ("toutes les personnes ne figurant pas dans la
+     répartition des équipes partagée sont à ignorer").
    - Taux d'occupation et Taux de transfert restent non calculés : la
      donnée source nécessaire n'est pas dans l'export RTT actuel (voir
      l'onglet Glossaire KPI) — ils s'affichent à "—".
@@ -1602,6 +1626,7 @@ function computeRttStats(ds, de){
     const k = normKey(agentName);
     if(!stats[k]){
       const {site, act} = classifyAgent(agentName, maps);
+      if(!site) return; // agent absent de la répartition des équipes partagée -> ignoré (consigne utilisateur)
       stats[k] = {agent:String(agentName).trim(), site, activite:act,
         heuresLogSec:0, dispoSec:0, retraitSec:0, panierSec:0, pauseSec:0, briefSec:0, jours:0};
     }
@@ -1615,6 +1640,18 @@ function computeRttStats(ds, de){
     s.jours++;
   });
   return stats;
+}
+
+// Utilisé par le KPI "CA/H" de l'onglet Dashboard : somme les heures de log (RTT) sur la même
+// période/site que le filtre Dashboard actif, en réutilisant l'agrégation par agent de computeRttStats.
+function sumHeuresLogSecForFilter(ds, de, siteFilter){
+  const rttStats = computeRttStats(ds, de);
+  let sec = 0;
+  Object.values(rttStats).forEach(s=>{
+    if(siteFilter && s.site !== siteFilter) return;
+    sec += s.heuresLogSec;
+  });
+  return sec;
 }
 
 function mergeAgentStats(caStats, rttStats){
@@ -1928,6 +1965,7 @@ function buildArchiveSnapshot(label){
   const ds = document.getElementById('date-start').value;
   const de = document.getElementById('date-end').value;
   const activiteFilter = document.getElementById('filter-activite').value;
+  const siteFilter = document.getElementById('filter-site').value;
   const totalCA = document.getElementById('kpi-ca').textContent;
   const totalActes = document.getElementById('kpi-actes').textContent;
   const detail = Array.from(document.querySelectorAll('#detail-body tr')).map(tr=>
@@ -1939,6 +1977,7 @@ function buildArchiveSnapshot(label){
     label: label,
     dateStart: ds, dateEnd: de,
     activiteFilter: activiteFilter || 'Toutes',
+    siteFilter: siteFilter || 'Tous',
     totalCA, totalActes,
     detail
   };
@@ -2009,6 +2048,8 @@ function viewArchive(id){
   document.getElementById('kpi-ca-sub').textContent = 'Archive du '+new Date(a.archivedAt).toLocaleString('fr-FR')+' — '+(a.label||'sans libellé');
   document.getElementById('kpi-actes').textContent = a.totalActes;
   document.getElementById('kpi-actes-sub').textContent = 'Vue archivée (lecture seule) — période '+a.dateStart+' → '+a.dateEnd;
+  document.getElementById('kpi-ca-h').textContent = '—';
+  document.getElementById('kpi-ca-h-sub').textContent = '';
   document.getElementById('kpi-dmt').textContent = '—';
   document.getElementById('kpi-dmt-sub').textContent = '';
   document.getElementById('dmt-filter-note').textContent = '';
