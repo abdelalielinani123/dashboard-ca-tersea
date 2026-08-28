@@ -157,7 +157,7 @@ textarea{width:100%;min-height:70px;font-family:var(--mono);font-size:12px;borde
 </div>
 
 <script>
-const PASSWORD_HASH = "dd50c9bf70d8e8e94d4784155d4b4127e5e0833d3348f2e7e8ca118aac9c0cd9"; // sha-256 du mot de passe partagé
+const PASSWORD_HASH = "c9290b0512117d76c0afd30611321a8c12a4d9ad816a6677eb85abe3b1953d7f"; // sha-256 du mot de passe partagé
 async function sha256(text){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
