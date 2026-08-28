@@ -245,7 +245,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <p>Import des extractions, grille tarifaire modifiable, calcul du CA par site et par activité</p>
     <p id="logged-user" style="margin-top:6px;font-size:11px;opacity:.75;"></p>
     <p id="db-status" style="margin-top:2px;font-size:11px;opacity:.75;">Base de données : connexion…</p>
-    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r3 (auto-calcul Reporting)</p>
+    <p style="margin-top:2px;font-size:10px;opacity:.5;">Version du fichier : 2026-08-28-r4 (filtres Site/Agent Reporting)</p>
   </div>
 </header>
 
@@ -559,6 +559,16 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <div class="row-actions view-toggle" style="margin-bottom:10px;">
       <button class="btn small" data-view="agent" onclick="setReportingView('agent')">Vue Agent</button>
       <button class="btn small secondary" data-view="activite" onclick="setReportingView('activite')">Vue globale par Activité</button>
+    </div>
+    <div class="row-actions" id="reporting-agent-filters" style="margin-bottom:10px;gap:14px;align-items:center;display:none;">
+      <label style="font-size:12px;font-weight:600;color:var(--navy-2);">Site
+        <select id="reporting-filter-site" onchange="renderReporting()" style="margin-left:6px;"><option value="">Tous les sites</option></select>
+      </label>
+      <label style="font-size:12px;font-weight:600;color:var(--navy-2);">Agent
+        <input type="text" id="reporting-filter-agent" placeholder="Rechercher un agent…" oninput="renderReporting()" style="margin-left:6px;width:220px;">
+      </label>
+      <button class="btn small secondary" onclick="resetReportingFilters()">Réinitialiser les filtres</button>
+      <span class="footnote" id="reporting-filter-count" style="margin:0;"></span>
     </div>
     <div id="reporting-empty" class="empty">Aucune donnée pour le moment. Chargez les fichiers dans l'onglet "1. Import" (entrants/sortants/mails + RTT, ou le JSON consolidé) puis lancez le calcul.</div>
     <div class="table-wrap" id="reporting-wrap" style="display:none;max-height:560px;">
@@ -1648,6 +1658,12 @@ function setReportingView(v){
   renderReporting();
 }
 
+function resetReportingFilters(){
+  document.getElementById('reporting-filter-site').value = '';
+  document.getElementById('reporting-filter-agent').value = '';
+  renderReporting();
+}
+
 function renderReporting(){
   const empty = document.getElementById('reporting-empty');
   const wrap = document.getElementById('reporting-wrap');
@@ -1679,9 +1695,35 @@ function renderReporting(){
   const tbody = document.getElementById('reporting-tbody');
   tbody.innerHTML = '';
 
+  const filterBar = document.getElementById('reporting-agent-filters');
+  const countLabel = document.getElementById('reporting-filter-count');
+
   if(reportingView === 'agent'){
+    filterBar.style.display = 'flex';
     thead.innerHTML = '<tr>'+theadAgent.map(h=>'<th>'+h+'</th>').join('')+'</tr>';
-    lastReportingMerged.forEach(m=>{
+
+    // Filtre Site : options reconstruites à partir des données courantes, en gardant la sélection en cours si possible.
+    const siteSel = document.getElementById('reporting-filter-site');
+    const sitesAvail = Array.from(new Set(lastReportingMerged.map(m=>m.site||'Non identifié'))).sort((a,b)=>a.localeCompare(b,'fr'));
+    const prevSite = siteSel.value;
+    siteSel.innerHTML = '<option value="">Tous les sites</option>'+sitesAvail.map(s=>'<option value="'+s+'">'+s+'</option>').join('');
+    if(sitesAvail.includes(prevSite)) siteSel.value = prevSite;
+
+    const siteFilter = siteSel.value;
+    const agentFilterRaw = (document.getElementById('reporting-filter-agent').value||'').trim();
+    const agentFilter = normKey(agentFilterRaw);
+
+    const filtered = lastReportingMerged.filter(m=>{
+      if(siteFilter && (m.site||'Non identifié') !== siteFilter) return false;
+      if(agentFilter && !normKey(m.agent||'').includes(agentFilter)) return false;
+      return true;
+    });
+
+    countLabel.textContent = (siteFilter || agentFilter)
+      ? filtered.length+' agent(s) affiché(s) sur '+lastReportingMerged.length
+      : '';
+
+    filtered.forEach(m=>{
       const tr = document.createElement('tr');
       if(!m.site) tr.style.opacity = '0.6';
       tr.innerHTML = `<td>${m.agent}</td><td>${m.site||'Non identifié'}</td><td>${m.activite||'—'}</td>
@@ -1694,6 +1736,8 @@ function renderReporting(){
       tbody.appendChild(tr);
     });
   } else {
+    filterBar.style.display = 'none';
+    countLabel.textContent = '';
     const groups = groupByActivite(lastReportingMerged);
     thead.innerHTML = '<tr>'+theadActivite.map(h=>'<th>'+h+'</th>').join('')+'</tr>';
     groups.forEach(g=>{
