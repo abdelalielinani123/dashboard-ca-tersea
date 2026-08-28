@@ -255,7 +255,8 @@ if(sessionStorage.getItem('dashca_auth_user')){
   <button class="tab-btn" data-tab="equipes">3. Répartition équipes</button>
   <button class="tab-btn" data-tab="dashboard">4. Dashboard</button>
   <button class="tab-btn" data-tab="historique">5. Historique</button>
-  <button class="tab-btn" data-tab="glossaire">6. Glossaire KPI</button>
+  <button class="tab-btn" data-tab="reporting">6. Reporting</button>
+  <button class="tab-btn" data-tab="glossaire">7. Glossaire KPI</button>
 </nav>
 
 <div class="app app-content" style="display:none;">
@@ -325,6 +326,15 @@ if(sessionStorage.getItem('dashca_auth_user')){
           <input type="file" id="f-flux" accept=".xls,.xlsx,.csv">
           <div class="label">Cliquer ou déposer le fichier</div>
           <div class="status" id="st-flux">Aucun fichier chargé</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>RTT / temps de connexion</h3>
+        <div class="hint">Export "Vonage Agent Summary" — alimente l'onglet Reporting (heures de log, disponibilité, retrait, panier, pause, brief).</div>
+        <div class="dropzone" id="dz-rtt" onclick="document.getElementById('f-rtt').click()">
+          <input type="file" id="f-rtt" accept=".xls,.xlsx,.csv">
+          <div class="label">Cliquer ou déposer le fichier</div>
+          <div class="status" id="st-rtt">Aucun fichier chargé</div>
         </div>
       </div>
       <div class="card">
@@ -538,12 +548,32 @@ if(sessionStorage.getItem('dashca_auth_user')){
     </div>
   </section>
 
-  <!-- ===================== 6. GLOSSAIRE KPI ===================== -->
+  <!-- ===================== 6. REPORTING ===================== -->
+  <section class="panel" id="panel-reporting">
+    <div class="section-title">Reporting — indicateurs du glossaire KPI</div>
+    <div class="footnote" style="margin-bottom:10px;">
+      Calculé à partir des fichiers chargés dans l'onglet Import (entrants/sortants/mails pour le CA et les actes, RTT pour les heures de log/disponibilité/retrait/panier/pause/brief). Couvre l'intégralité des données chargées (pas de filtre de période ici — voir l'onglet Dashboard pour une période précise). Taux d'occupation et Taux de transfert restent à "—" : la donnée source n'est pas encore disponible (voir l'onglet Glossaire KPI).
+    </div>
+    <div class="footnote" id="reporting-coverage" style="margin-bottom:12px;font-weight:600;"></div>
+    <div class="row-actions view-toggle" style="margin-bottom:10px;">
+      <button class="btn small" data-view="agent" onclick="setReportingView('agent')">Vue Agent</button>
+      <button class="btn small secondary" data-view="activite" onclick="setReportingView('activite')">Vue globale par Activité</button>
+    </div>
+    <div id="reporting-empty" class="empty">Aucune donnée pour le moment. Chargez les fichiers dans l'onglet "1. Import" (entrants/sortants/mails + RTT, ou le JSON consolidé) puis lancez le calcul.</div>
+    <div class="table-wrap" id="reporting-wrap" style="display:none;max-height:560px;">
+      <table>
+        <thead id="reporting-thead"></thead>
+        <tbody id="reporting-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== 7. GLOSSAIRE KPI ===================== -->
   <section class="panel" id="panel-glossaire">
     <div class="section-title">Glossaire des KPI</div>
     <div class="footnote" style="margin-bottom:14px;">
-      ✅ = déjà calculé dans ce dashboard à partir des extractions actuelles (entrants/sortants/mails).
-      ⏳ = nécessite un nouvel export non encore fourni (RTT / temps de connexion, transferts) — dès qu'il sera partagé, ces KPI seront activés.
+      ✅ = calculé — visible dans l'onglet Reporting (et le Dashboard pour CA/Actes). ⏳ = pas encore calculable avec les exports disponibles.
+      Pour les KPI "RTT" : Taux de retrait utilise directement la colonne "Durée de retrait" fournie par l'export (plutôt que de resommer les sous-catégories pause/brief/réunion/... une à une, plus robuste et moins sujet aux erreurs d'arrondi/valeurs manquantes) — à valider avec vous si une définition différente est attendue.
     </div>
     <div class="table-wrap">
       <table>
@@ -552,24 +582,28 @@ if(sessionStorage.getItem('dashca_auth_user')){
         </tr></thead>
         <tbody>
           <tr><td>✅</td><td>CA</td><td>—</td><td>Entier €</td><td>Nombre d'actes traités (Mail, appel sortant, appel entrant) × la grille de facturation</td><td>1</td></tr>
-          <tr><td>⏳</td><td>CA/H</td><td>—</td><td>Entier €</td><td>Nombre d'actes traités × la grille de facturation</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>CA/H</td><td>—</td><td>Entier €</td><td>CA de l'agent/activité</td><td>Heures de log (RTT)</td></tr>
           <tr><td>✅</td><td>Actes traités</td><td>—</td><td>—</td><td>Mails traités + Appels entrants + Appels sortants</td><td>—</td></tr>
           <tr><td>✅</td><td>Mails traités</td><td>Mails traités</td><td>Nombre</td><td>Nombre de lignes avec le nom du conseiller, marquées traitées</td><td>1</td></tr>
           <tr><td>✅</td><td>Appels entrants</td><td>Appels entrants</td><td>Nombre</td><td>Nombre de lignes avec le nom du conseiller sur une file mappée</td><td>1</td></tr>
-          <tr><td>⏳</td><td>MEA</td><td>Appels entrants</td><td>Entier</td><td>Somme des temps de mise en attente par conseiller</td><td>Appels entrants</td></tr>
-          <tr><td>⏳</td><td>ACW</td><td>Appels entrants</td><td>Entier</td><td>Somme des After Call Work Time par conseiller</td><td>Appels entrants</td></tr>
+          <tr><td>✅</td><td>MEA</td><td>Appels entrants</td><td>Entier</td><td>Somme des temps de mise en attente par conseiller</td><td>Appels entrants</td></tr>
+          <tr><td>✅</td><td>ACW</td><td>Appels entrants + sortants</td><td>Entier</td><td>Somme des After Call Work Time par conseiller</td><td>Appels entrants + sortants</td></tr>
           <tr><td>✅</td><td>Appels sortants</td><td>Appels sortants</td><td>Nombre</td><td>Nombre de lignes avec le nom du conseiller</td><td>1</td></tr>
-          <tr><td>⏳</td><td>Heures de log</td><td>RTT</td><td>Entier</td><td>Temps de connexion par conseiller</td><td>3600 (conversion en heures)</td></tr>
-          <tr><td>⏳</td><td>Taux de retrait</td><td>RTT</td><td>Pourcentage</td><td>Somme des temps de retrait (pause, brief, réunions...) par conseiller</td><td>Heures de log</td></tr>
-          <tr><td>⏳</td><td>Temps de dispo</td><td>RTT</td><td>Pourcentage</td><td>Temps disponible par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Heures de log</td><td>RTT</td><td>Entier</td><td>"Durée totale de connexion" par conseiller</td><td>3600 (conversion en heures)</td></tr>
+          <tr><td>✅</td><td>Taux de retrait</td><td>RTT</td><td>Pourcentage</td><td>"Durée de retrait" par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Temps de dispo</td><td>RTT</td><td>Pourcentage</td><td>"Temps de dispo" par conseiller</td><td>Heures de log</td></tr>
           <tr><td>⏳</td><td>Taux d'occupation</td><td>RTT</td><td>Pourcentage</td><td>Temps en communication + après-appel + attente</td><td>Heures de log</td></tr>
-          <tr><td>⏳</td><td>Taux panier</td><td>RTT</td><td>Pourcentage</td><td>Temps "panier" par conseiller</td><td>Heures de log</td></tr>
-          <tr><td>⏳</td><td>Taux Pause</td><td>RTT</td><td>Pourcentage</td><td>Temps de pause par conseiller</td><td>Heures de log</td></tr>
-          <tr><td>⏳</td><td>Taux brief</td><td>RTT</td><td>Pourcentage</td><td>Temps de brief par conseiller</td><td>Heures de log</td></tr>
-          <tr><td>⏳</td><td>Prod / h</td><td>—</td><td>Entier</td><td>Actes traités</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Taux panier</td><td>RTT</td><td>Pourcentage</td><td>"Panier" par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Taux Pause</td><td>RTT</td><td>Pourcentage</td><td>"Pause cafe" par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Taux brief</td><td>RTT</td><td>Pourcentage</td><td>"Brief" par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Prod / h</td><td>—</td><td>Entier</td><td>Actes traités</td><td>Heures de log (RTT)</td></tr>
           <tr><td>⏳</td><td>Taux de transfert</td><td>Taux de transfert</td><td>Pourcentage</td><td>Appels transférés</td><td>Appels traités</td></tr>
         </tbody>
       </table>
+      <div class="footnote" style="margin-top:10px;">
+        Taux d'occupation : en attente — la colonne source ("Durée d'appel sortant", au format hh:mm dans l'export RTT) n'a pas été conservée dans le premier import JSON et la formule de conversion doit être validée avec vous avant activation.<br>
+        Taux de transfert : en attente d'un export dédié (non présent dans les fichiers reçus à ce jour).
+      </div>
     </div>
   </section>
 
@@ -580,8 +614,9 @@ if(sessionStorage.getItem('dashca_auth_user')){
    STATE
 ========================================================================= */
 const state = {
-  files:{ entrants:null, sortants:null, mails:null, repartition:null, flux:null },
-  raw:{ entrants:[], sortants:[], mails:[] },
+  files:{ entrants:null, sortants:null, mails:null, repartition:null, flux:null, rtt:null },
+  raw:{ entrants:[], sortants:[], mails:[], rtt:[] },
+  agentCaStats:{},
   lotUnique:[], sav:[], fluxMap:[],
   tarifs:[],
   dmtFormula:'',
@@ -909,6 +944,14 @@ setupJsonDropzone('dz-json','f-json',(data,file)=>{
     document.getElementById('st-mails').textContent = file.name+' — '+data.mails.length+' lignes (JSON)';
     parts.push(data.mails.length+' mails');
   }
+  if(Array.isArray(data.rtt)){
+    state.raw.rtt = data.rtt;
+    state.files.rtt = file.name+' (JSON)';
+    document.getElementById('dz-rtt').classList.add('ok');
+    document.getElementById('st-rtt').textContent = file.name+' — '+data.rtt.length+' lignes (JSON)';
+    parts.push(data.rtt.length+' RTT');
+    refreshAgentReporting();
+  }
   if(!parts.length){
     log('Fichier JSON reconnu mais aucune clé "entrants"/"sortants"/"mails" (tableaux) trouvée.', 'err');
     return;
@@ -949,13 +992,24 @@ setupDropzone('dz-flux','f-flux',(res,file)=>{
   document.getElementById('st-flux').textContent = file.name+' — '+state.fluxMap.length+' correspondances';
   log('Référentiel flux chargé : '+state.fluxMap.length+' files mappées', 'ok');
 });
+setupDropzone('dz-rtt','f-rtt',(res,file)=>{
+  const sheet = res.sheets[res.sheetNames[0]];
+  state.raw.rtt = sheet;
+  state.files.rtt = file.name;
+  document.getElementById('dz-rtt').classList.add('ok');
+  document.getElementById('st-rtt').textContent = file.name+' — '+sheet.length+' lignes';
+  log('RTT chargé : '+sheet.length+' lignes', 'ok');
+  refreshAgentReporting();
+});
 
 async function clearAllFiles(){
-  state.raw = {entrants:[], sortants:[], mails:[]};
-  state.files = {entrants:null, sortants:null, mails:null, repartition:null, flux:null};
+  state.raw = {entrants:[], sortants:[], mails:[], rtt:[]};
+  state.files = {entrants:null, sortants:null, mails:null, repartition:null, flux:null, rtt:null};
   state.results = [];
+  state.agentCaStats = {};
   state.dmt = {global:null, bysite:{}};
-  ['entrants','sortants','mails','repartition','flux','json'].forEach(k=>{
+  renderReporting();
+  ['entrants','sortants','mails','repartition','flux','json','rtt'].forEach(k=>{
     document.getElementById('dz-'+k).classList.remove('ok');
     document.getElementById('st-'+k).textContent = 'Aucun fichier chargé';
     document.getElementById('f-'+k).value = '';
@@ -1018,6 +1072,8 @@ async function runCalculationAsync(){
     const queueCol = findCol(sample, ["Nom de la file d'attente"]);
     const agentCol = findCol(sample, ['Agent: Nom complet','Agent']);
     const dateCol = findCol(sample, ['Date de création','Date']);
+    const meaCol = findCol(sample, ['Durée de mise en attente (consultation)','Durée de mise en attente']);
+    const acwCol = findCol(sample, ['After Call Work Time']);
     let n_ok=0, n_skip_queue=0, n_skip_site=0;
     state.raw.entrants.forEach(r=>{
       const queue = r[queueCol];
@@ -1027,7 +1083,8 @@ async function runCalculationAsync(){
       if(!site){ n_skip_site++; return; }
       const activite = (fluxType === 'SAV') ? 'SAV' : 'LOT UNIQUE';
       const type = (fluxType === 'SAV') ? 'Actes traités' : fluxType;
-      rows.push({date:parseDate(r[dateCol]), site, activite, type});
+      rows.push({date:parseDate(r[dateCol]), site, activite, type, agent:r[agentCol],
+        mea:Number(r[meaCol])||0, acw:Number(r[acwCol])||0});
       n_ok++;
     });
     log('Entrants : '+n_ok+' actes retenus, '+n_skip_queue+' file non mappée, '+n_skip_site+' agent non identifié', 'ok');
@@ -1049,7 +1106,8 @@ async function runCalculationAsync(){
       const {site, act} = classifyAgent(r[agentCol], maps);
       if(site) sortantsDurees.push({site, duree}); // DMT calculée sur les appels retenus (respecte le filtre <30s actif)
       if(!site){ n_skip_site++; return; }
-      rows.push({date:parseDate(r[dateCol]), site, activite:act, type:'Appels sortants', duree});
+      rows.push({date:parseDate(r[dateCol]), site, activite:act, type:'Appels sortants', duree, agent:r[agentCol],
+        mea:0, acw:Number(r[acwCol])||0});
       n_ok++;
     });
     log('Sortants : '+n_ok+' actes retenus, '+n_skip_rep+' non répondus, '+n_skip_short+' <'+threshold+'s exclus, '+n_skip_site+' agent non identifié', 'ok');
@@ -1067,7 +1125,7 @@ async function runCalculationAsync(){
       const {site, act} = classifyAgent(r[agentCol], maps);
       if(!site){ n_skip++; return; }
       const activite = mailMutualise ? 'LOT UNIQUE' : act;
-      rows.push({date:parseDate(r[dateCol]), site, activite, type:'Mails'});
+      rows.push({date:parseDate(r[dateCol]), site, activite, type:'Mails', agent:r[agentCol], mea:0, acw:0});
       n_ok++;
     });
     log('Mails : '+n_ok+' actes retenus, '+n_skip_zero+' exclus ('+lastCol+'=0), '+n_skip+' agent non identifié', 'ok');
@@ -1093,6 +1151,11 @@ async function runCalculationAsync(){
   state.results = Object.values(agg);
   log('Calcul terminé : '+state.results.length+' lignes agrégées, '+rows.length+' actes au total.', 'ok');
   document.getElementById('calc-status').textContent = '✓ Calcul effectué — voir l\'onglet Dashboard';
+
+  // Reporting (Vue Agent / Vue Activité) : CA + actes par agent, dérivés des mêmes lignes que le calcul
+  // ci-dessus (garantit que la somme par agent retombe exactement sur le CA total du Dashboard).
+  state.agentCaStats = computeAgentCaStats(rows);
+  refreshAgentReporting();
 
   const dates = state.results.map(r=>r.date).filter(Boolean).sort();
   if(dates.length){
@@ -1382,6 +1445,225 @@ function exportCsv(){
   a.href = URL.createObjectURL(blob);
   a.download = 'detail_ca.csv';
   a.click();
+}
+
+/* =========================================================================
+   REPORTING (Vue Agent / Vue Activité) — tous les KPI du glossaire
+   ========================================================================
+   - Le CA/actes par agent est dérivé des mêmes lignes ("rows") que le calcul
+     du Dashboard : la somme par agent retombe donc exactement sur le CA
+     total affiché dans le Dashboard (aucun recalcul divergent).
+   - Les indicateurs de connexion (heures de log, disponibilité, retrait,
+     panier, pause, brief) viennent du fichier RTT, agrégé par agent
+     indépendamment (un agent peut apparaître dans le RTT sans encore être
+     reconnu par la Répartition d'équipes -> il reste visible, avec
+     Site/Activité = "Non identifié", pour ne rien cacher).
+   - Taux d'occupation et Taux de transfert restent non calculés : la
+     donnée source nécessaire n'est pas dans l'export RTT actuel (voir
+     l'onglet Glossaire KPI) — ils s'affichent à "—".
+========================================================================= */
+function computeAgentCaStats(rows){
+  const stats = {};
+  rows.forEach(r=>{
+    if(!r.agent) return;
+    const k = normKey(r.agent);
+    if(!stats[k]) stats[k] = {agent:String(r.agent).trim(), site:r.site, activite:r.activite,
+      entrants:0, sortants:0, mails:0, ca:0, meaSum:0, acwSum:0};
+    const s = stats[k];
+    const dk = dateKey(r.date);
+    const ferie = isFerieDay(dk);
+    const siteDmt = state.dmt.bysite[r.site];
+    const price = priceFor(r.site, r.activite, r.type, siteDmt, ferie);
+    s.ca += price * 1;
+    if(r.type === 'Appels sortants'){ s.sortants++; s.acwSum += r.acw||0; }
+    else if(r.type === 'Mails'){ s.mails++; }
+    else { s.entrants++; s.meaSum += r.mea||0; s.acwSum += r.acw||0; } // HYPER/C2E/AFR/Drive/Actes traités (SAV)
+  });
+  return stats;
+}
+
+function computeRttStats(){
+  const stats = {};
+  if(!state.raw.rtt.length) return stats;
+  const maps = buildMaps();
+  const sample = state.raw.rtt[0];
+  const agentCol = findCol(sample, ['Nom du propriétaire','Vonage Agent Summary: Nom du propriétaire','Agent: Nom complet','Agent']);
+  const connCol = findCol(sample, ['Durée totale de connexion']);
+  const dispoCol = findCol(sample, ['Temps de dispo']);
+  const retraitCol = findCol(sample, ['Durée de retrait']);
+  const panierCol = findCol(sample, ['Panier']);
+  const pauseCol = findCol(sample, ['Pause cafe']);
+  const briefCol = findCol(sample, ['Brief']);
+  state.raw.rtt.forEach(r=>{
+    const agentName = r[agentCol];
+    if(!agentName) return;
+    const k = normKey(agentName);
+    if(!stats[k]){
+      const {site, act} = classifyAgent(agentName, maps);
+      stats[k] = {agent:String(agentName).trim(), site, activite:act,
+        heuresLogSec:0, dispoSec:0, retraitSec:0, panierSec:0, pauseSec:0, briefSec:0, jours:0};
+    }
+    const s = stats[k];
+    s.heuresLogSec += Number(r[connCol])||0;
+    s.dispoSec += Number(r[dispoCol])||0;
+    s.retraitSec += Number(r[retraitCol])||0;
+    s.panierSec += Number(r[panierCol])||0;
+    s.pauseSec += Number(r[pauseCol])||0;
+    s.briefSec += Number(r[briefCol])||0;
+    s.jours++;
+  });
+  return stats;
+}
+
+function mergeAgentStats(caStats, rttStats){
+  const keys = new Set([...Object.keys(caStats), ...Object.keys(rttStats)]);
+  const merged = [];
+  keys.forEach(k=>{
+    const c = caStats[k], r = rttStats[k];
+    const agent = (c&&c.agent) || (r&&r.agent);
+    const site = (c&&c.site) || (r&&r.site) || null;
+    const activite = (c&&c.activite) || (r&&r.activite) || null;
+    const entrants = c?c.entrants:0, sortants = c?c.sortants:0, mails = c?c.mails:0;
+    const actes = entrants+sortants+mails;
+    const ca = c?c.ca:0;
+    const heuresLogSec = r?r.heuresLogSec:0;
+    const heuresLog = heuresLogSec/3600;
+    merged.push({
+      agent, site, activite,
+      entrants, sortants, mails, actes, ca,
+      caParHeure: heuresLog>0 ? ca/heuresLog : null,
+      prodParHeure: heuresLog>0 ? actes/heuresLog : null,
+      meaMoy: c && entrants>0 ? c.meaSum/entrants : null,
+      acwMoy: c && (entrants+sortants)>0 ? c.acwSum/(entrants+sortants) : null,
+      heuresLogSec, heuresLog: r ? heuresLog : null,
+      dispoSec: r?r.dispoSec:0, retraitSec: r?r.retraitSec:0, panierSec: r?r.panierSec:0,
+      pauseSec: r?r.pauseSec:0, briefSec: r?r.briefSec:0,
+      tauxDispo: heuresLogSec>0 ? r.dispoSec/heuresLogSec : null,
+      tauxRetrait: heuresLogSec>0 ? r.retraitSec/heuresLogSec : null,
+      tauxPanier: heuresLogSec>0 ? r.panierSec/heuresLogSec : null,
+      tauxPause: heuresLogSec>0 ? r.pauseSec/heuresLogSec : null,
+      tauxBrief: heuresLogSec>0 ? r.briefSec/heuresLogSec : null,
+      hasCa: !!c, hasRtt: !!r
+    });
+  });
+  merged.sort((a,b)=> (b.ca||0)-(a.ca||0));
+  return merged;
+}
+
+function groupByActivite(merged){
+  const groups = {};
+  merged.forEach(m=>{
+    const key = (m.site||'Non identifié')+'|'+(m.activite||'—');
+    if(!groups[key]) groups[key] = {site:m.site||'Non identifié', activite:m.activite||'—',
+      nbAgents:0, entrants:0, sortants:0, mails:0, actes:0, ca:0,
+      heuresLogSec:0, dispoSec:0, retraitSec:0, panierSec:0, pauseSec:0, briefSec:0,
+      meaSumTot:0, entrantsTot:0, acwSumTot:0, actesAcwTot:0};
+    const g = groups[key];
+    g.nbAgents++;
+    g.entrants += m.entrants; g.sortants += m.sortants; g.mails += m.mails; g.actes += m.actes; g.ca += m.ca;
+    g.heuresLogSec += m.heuresLogSec||0;
+    g.dispoSec += m.dispoSec||0; g.retraitSec += m.retraitSec||0; g.panierSec += m.panierSec||0;
+    g.pauseSec += m.pauseSec||0; g.briefSec += m.briefSec||0;
+    if(m.meaMoy!=null){ g.meaSumTot += m.meaMoy*m.entrants; g.entrantsTot += m.entrants; }
+    if(m.acwMoy!=null){ g.acwSumTot += m.acwMoy*(m.entrants+m.sortants); g.actesAcwTot += (m.entrants+m.sortants); }
+  });
+  const out = Object.values(groups).map(g=>{
+    const heuresLog = g.heuresLogSec/3600;
+    return {
+      site:g.site, activite:g.activite, nbAgents:g.nbAgents,
+      entrants:g.entrants, sortants:g.sortants, mails:g.mails, actes:g.actes, ca:g.ca,
+      heuresLog: g.heuresLogSec>0 ? heuresLog : null,
+      caParHeure: heuresLog>0 ? g.ca/heuresLog : null,
+      prodParHeure: heuresLog>0 ? g.actes/heuresLog : null,
+      meaMoy: g.entrantsTot>0 ? g.meaSumTot/g.entrantsTot : null,
+      acwMoy: g.actesAcwTot>0 ? g.acwSumTot/g.actesAcwTot : null,
+      tauxDispo: g.heuresLogSec>0 ? g.dispoSec/g.heuresLogSec : null,
+      tauxRetrait: g.heuresLogSec>0 ? g.retraitSec/g.heuresLogSec : null,
+      tauxPanier: g.heuresLogSec>0 ? g.panierSec/g.heuresLogSec : null,
+      tauxPause: g.heuresLogSec>0 ? g.pauseSec/g.heuresLogSec : null,
+      tauxBrief: g.heuresLogSec>0 ? g.briefSec/g.heuresLogSec : null,
+    };
+  });
+  out.sort((a,b)=> (b.ca||0)-(a.ca||0));
+  return out;
+}
+
+function fmtPct(x){ return x==null ? '—' : (x*100).toLocaleString('fr-FR',{minimumFractionDigits:1,maximumFractionDigits:1})+' %'; }
+function fmtH(x){ return x==null ? '—' : x.toLocaleString('fr-FR',{minimumFractionDigits:1,maximumFractionDigits:1})+' h'; }
+function fmtSec(x){ return x==null ? '—' : Math.round(x)+' s'; }
+function fmtEURorDash(x){ return x==null ? '—' : fmtEUR(x); }
+
+let lastReportingMerged = [];
+function refreshAgentReporting(){
+  const rttStats = computeRttStats();
+  lastReportingMerged = mergeAgentStats(state.agentCaStats||{}, rttStats);
+  renderReporting();
+}
+
+let reportingView = 'agent';
+function setReportingView(v){
+  reportingView = v;
+  document.querySelectorAll('#panel-reporting .view-toggle button').forEach(b=>{
+    b.classList.toggle('secondary', b.dataset.view!==v);
+  });
+  renderReporting();
+}
+
+function renderReporting(){
+  const empty = document.getElementById('reporting-empty');
+  const wrap = document.getElementById('reporting-wrap');
+  if(!lastReportingMerged.length){
+    empty.style.display='block'; wrap.style.display='none';
+    return;
+  }
+  empty.style.display='none'; wrap.style.display='block';
+
+  const nbRtt = lastReportingMerged.filter(m=>m.hasRtt).length;
+  document.getElementById('reporting-coverage').textContent =
+    lastReportingMerged.length+' agents au total — '+nbRtt+' avec données RTT (heures de log/disponibilité/retrait...)'+
+    (nbRtt < lastReportingMerged.length ? ', '+(lastReportingMerged.length-nbRtt)+' sans (importer le fichier RTT pour les compléter)' : '');
+
+  const theadAgent = ['Agent','Site','Activité','Actes traités','Appels entrants','Appels sortants','Mails traités',
+    'MEA moy.','ACW moy.','CA (€)','Heures de log','CA/H (€)','Prod/H','Temps de dispo','Taux de retrait',
+    'Taux panier','Taux Pause','Taux brief'];
+  const theadActivite = ['Site','Activité','Nb agents','Actes traités','Appels entrants','Appels sortants',
+    'Mails traités','MEA moy.','ACW moy.','CA (€)','Heures de log','CA/H (€)','Prod/H','Temps de dispo',
+    'Taux de retrait','Taux panier','Taux Pause','Taux brief'];
+
+  const thead = document.getElementById('reporting-thead');
+  const tbody = document.getElementById('reporting-tbody');
+  tbody.innerHTML = '';
+
+  if(reportingView === 'agent'){
+    thead.innerHTML = '<tr>'+theadAgent.map(h=>'<th>'+h+'</th>').join('')+'</tr>';
+    lastReportingMerged.forEach(m=>{
+      const tr = document.createElement('tr');
+      if(!m.site) tr.style.opacity = '0.6';
+      tr.innerHTML = `<td>${m.agent}</td><td>${m.site||'Non identifié'}</td><td>${m.activite||'—'}</td>
+        <td>${fmtNum(m.actes)}</td><td>${fmtNum(m.entrants)}</td><td>${fmtNum(m.sortants)}</td><td>${fmtNum(m.mails)}</td>
+        <td>${fmtSec(m.meaMoy)}</td><td>${fmtSec(m.acwMoy)}</td>
+        <td>${fmtEURorDash(m.ca)}</td><td>${fmtH(m.heuresLog)}</td><td>${fmtEURorDash(m.caParHeure)}</td>
+        <td>${m.prodParHeure==null?'—':m.prodParHeure.toFixed(2)}</td>
+        <td>${fmtPct(m.tauxDispo)}</td><td>${fmtPct(m.tauxRetrait)}</td><td>${fmtPct(m.tauxPanier)}</td>
+        <td>${fmtPct(m.tauxPause)}</td><td>${fmtPct(m.tauxBrief)}</td>`;
+      tbody.appendChild(tr);
+    });
+  } else {
+    const groups = groupByActivite(lastReportingMerged);
+    thead.innerHTML = '<tr>'+theadActivite.map(h=>'<th>'+h+'</th>').join('')+'</tr>';
+    groups.forEach(g=>{
+      const tr = document.createElement('tr');
+      if(g.site==='Non identifié') tr.style.opacity = '0.6';
+      tr.innerHTML = `<td>${g.site}</td><td>${g.activite}</td><td>${g.nbAgents}</td>
+        <td>${fmtNum(g.actes)}</td><td>${fmtNum(g.entrants)}</td><td>${fmtNum(g.sortants)}</td><td>${fmtNum(g.mails)}</td>
+        <td>${fmtSec(g.meaMoy)}</td><td>${fmtSec(g.acwMoy)}</td>
+        <td>${fmtEURorDash(g.ca)}</td><td>${fmtH(g.heuresLog)}</td><td>${fmtEURorDash(g.caParHeure)}</td>
+        <td>${g.prodParHeure==null?'—':g.prodParHeure.toFixed(2)}</td>
+        <td>${fmtPct(g.tauxDispo)}</td><td>${fmtPct(g.tauxRetrait)}</td><td>${fmtPct(g.tauxPanier)}</td>
+        <td>${fmtPct(g.tauxPause)}</td><td>${fmtPct(g.tauxBrief)}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
 }
 
 /* =========================================================================
@@ -1821,6 +2103,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-'+btn.dataset.tab).classList.add('active');
+    if(btn.dataset.tab === 'reporting') renderReporting();
   });
 });
 
