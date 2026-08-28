@@ -923,12 +923,14 @@ setupDropzone('dz-mails','f-mails',(res,file)=>{
 });
 setupJsonDropzone('dz-json','f-json',(data,file)=>{
   let parts = [];
+  let hasCallData = false;
   if(Array.isArray(data.entrants)){
     state.raw.entrants = data.entrants;
     state.files.entrants = file.name+' (JSON)';
     document.getElementById('dz-entrants').classList.add('ok');
     document.getElementById('st-entrants').textContent = file.name+' — '+data.entrants.length+' lignes (JSON)';
     parts.push(data.entrants.length+' entrants');
+    hasCallData = true;
   }
   if(Array.isArray(data.sortants)){
     state.raw.sortants = data.sortants;
@@ -936,6 +938,7 @@ setupJsonDropzone('dz-json','f-json',(data,file)=>{
     document.getElementById('dz-sortants').classList.add('ok');
     document.getElementById('st-sortants').textContent = file.name+' — '+data.sortants.length+' lignes (JSON)';
     parts.push(data.sortants.length+' sortants');
+    hasCallData = true;
   }
   if(Array.isArray(data.mails)){
     state.raw.mails = data.mails;
@@ -943,6 +946,7 @@ setupJsonDropzone('dz-json','f-json',(data,file)=>{
     document.getElementById('dz-mails').classList.add('ok');
     document.getElementById('st-mails').textContent = file.name+' — '+data.mails.length+' lignes (JSON)';
     parts.push(data.mails.length+' mails');
+    hasCallData = true;
   }
   if(Array.isArray(data.rtt)){
     state.raw.rtt = data.rtt;
@@ -950,7 +954,6 @@ setupJsonDropzone('dz-json','f-json',(data,file)=>{
     document.getElementById('dz-rtt').classList.add('ok');
     document.getElementById('st-rtt').textContent = file.name+' — '+data.rtt.length+' lignes (JSON)';
     parts.push(data.rtt.length+' RTT');
-    refreshAgentReporting();
     storage.set('raw_rtt', JSON.stringify(state.raw.rtt)).catch(()=>{});
   }
   if(!parts.length){
@@ -959,7 +962,19 @@ setupJsonDropzone('dz-json','f-json',(data,file)=>{
   }
   document.getElementById('dz-json').classList.add('ok');
   document.getElementById('st-json').textContent = file.name+' — '+parts.join(', ');
-  log('Import JSON chargé : '+parts.join(', ')+'. Cliquez sur "▶ Lancer le calcul".', 'ok');
+  if(hasCallData){
+    // Import JSON = import "tout-en-un" : on lance le calcul complet automatiquement
+    // (CA, Dashboard, Historique, ET les données du Reporting par agent/activité qui en
+    // dépendent) au lieu d'attendre un clic séparé sur "Lancer le calcul".
+    log('Import JSON chargé : '+parts.join(', ')+'. Calcul automatique en cours…', 'ok');
+    runCalculation();
+  } else {
+    // JSON contenant uniquement du RTT (mise à jour partielle) : on rafraîchit l'aperçu
+    // Reporting avec les heures de log, mais le CA/les actes par agent restent à 0 tant
+    // qu'un calcul complet (avec entrants/sortants/mails) n'a pas été lancé.
+    log('Import JSON chargé : '+parts.join(', ')+' (RTT seul — CA/actes par agent nécessitent un calcul complet, cliquez sur "▶ Lancer le calcul" une fois les autres fichiers chargés).', 'ok');
+    refreshAgentReporting();
+  }
 });
 setupDropzone('dz-repartition','f-repartition',(res,file)=>{
   let lotSheet=null, savSheet=null;
@@ -1628,9 +1643,15 @@ function renderReporting(){
   empty.style.display='none'; wrap.style.display='block';
 
   const nbRtt = lastReportingMerged.filter(m=>m.hasRtt).length;
-  document.getElementById('reporting-coverage').textContent =
-    lastReportingMerged.length+' agents au total — '+nbRtt+' avec données RTT (heures de log/disponibilité/retrait...)'+
+  const nbCa = lastReportingMerged.filter(m=>m.hasCa).length;
+  let coverageTxt = lastReportingMerged.length+' agents au total — '+nbRtt+' avec données RTT (heures de log/disponibilité/retrait...)'+
     (nbRtt < lastReportingMerged.length ? ', '+(lastReportingMerged.length-nbRtt)+' sans (importer le fichier RTT pour les compléter)' : '');
+  if(nbCa === 0){
+    coverageTxt += ' — ⚠️ CA/actes non calculés : cliquez sur "▶ Lancer le calcul" dans l\'onglet Import (avec entrants/sortants/mails chargés) pour les obtenir.';
+  } else if(nbCa < lastReportingMerged.length){
+    coverageTxt += ', '+nbCa+' avec CA/actes calculés (les autres n\'apparaissent que dans les appels entrants/sortants/mails ou seulement en RTT)';
+  }
+  document.getElementById('reporting-coverage').textContent = coverageTxt;
 
   const theadAgent = ['Agent','Site','Activité','Actes traités','Appels entrants','Appels sortants','Mails traités',
     'MEA moy.','ACW moy.','CA (€)','Heures de log','CA/H (€)','Prod/H','Temps de dispo','Taux de retrait',
