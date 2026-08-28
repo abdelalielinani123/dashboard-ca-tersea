@@ -6,6 +6,43 @@
 <title>Dashboard CA — TERSEA Auchan</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<!-- ============================================================
+     FIREBASE — même projet que le dashboard Qualité (suiviqualitemada),
+     collection Firestore séparée ("dashboard_ca") pour ne pas mélanger
+     les données. La clé API Firebase n'a rien de secret ici : la
+     sécurité réelle repose sur les règles Firestore (firestore.rules),
+     pas sur le fait de la cacher.
+     ============================================================ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyCwQkHcJLFn8z0cw1gBYUmZpW7VRs5dGAc",
+    authDomain: "suiviqualitemada.firebaseapp.com",
+    projectId: "suiviqualitemada",
+    storageBucket: "suiviqualitemada.firebasestorage.app",
+    messagingSenderId: "51800223156",
+    appId: "1:51800223156:web:49a541a49bc7976d8e16e1"
+  };
+
+  window.__firebaseConfigured = true;
+  try {
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    window.__fb = { db, doc, getDoc, setDoc, deleteDoc, onSnapshot };
+    signInAnonymously(auth)
+      .then(() => { window.__firebaseReady = true; })
+      .catch((e) => { window.__firebaseError = e.message; window.__firebaseReady = true; });
+  } catch (e) {
+    window.__firebaseError = e.message;
+    window.__firebaseReady = true;
+  }
+</script>
+
 <style>
 :root{
   --navy:#1b2b4a;
@@ -192,6 +229,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <h1>Dashboard Chiffre d'Affaires — TERSEA / Auchan</h1>
     <p>Import des extractions, grille tarifaire modifiable, calcul du CA par site et par activité</p>
     <p id="logged-user" style="margin-top:6px;font-size:11px;opacity:.75;"></p>
+    <p id="db-status" style="margin-top:2px;font-size:11px;opacity:.75;">Base de données : connexion…</p>
   </div>
 </header>
 
@@ -433,7 +471,7 @@ if(sessionStorage.getItem('dashca_auth_user')){
     <div class="footnote" style="margin-bottom:14px;">
       Chaque archive fige le CA calculé pour la vue affichée au moment du clic sur "📦 Archiver cette vue" (période, filtre activité, heures Barcelone inclus). Utile pour garder une trace mensuelle/hebdomadaire même après un recalcul ultérieur.
     </div>
-    <div id="historique-empty" class="empty">Aucune archive pour le moment. Depuis l'onglet Dashboard, cliquez sur "📦 Archiver cette vue" pour en créer une.</div>
+    <div id="historique-empty" class="empty">Aucune archive pour le moment. Chaque calcul lancé depuis l'onglet Import est maintenant conservé automatiquement ici — vous pouvez aussi cliquer sur "📦 Archiver cette vue" pour créer une archive avec un libellé personnalisé.</div>
     <div class="table-wrap" id="historique-wrap" style="display:none;">
       <table>
         <thead><tr>
@@ -843,6 +881,9 @@ async function runCalculationAsync(){
   }
   renderDashboard();
 
+  // Conserve ce chargement dans l'historique (base de données), sans action requise
+  await autoArchiveCurrentCalculation();
+
   // Sauvegarde des résultats agrégés + DMT pour restaurer au prochain chargement
   try{
     await storage.set('last_results', JSON.stringify(state.results));
@@ -1110,13 +1151,7 @@ function exportCsv(){
 /* =========================================================================
    ARCHIVAGE / HISTORIQUE
 ========================================================================= */
-async function archiveCurrentView(){
-  if(!state.results.length){
-    log('Rien à archiver : lancez un calcul depuis l\'onglet Import d\'abord.', 'err');
-    return;
-  }
-  const label = prompt('Libellé de cette archive (ex. "Juin 2026", "Semaine 25")', '') || '';
-
+function buildArchiveSnapshot(label){
   const ds = document.getElementById('date-start').value;
   const de = document.getElementById('date-end').value;
   const activiteFilter = document.getElementById('filter-activite').value;
@@ -1125,9 +1160,8 @@ async function archiveCurrentView(){
   const detail = Array.from(document.querySelectorAll('#detail-body tr')).map(tr=>
     Array.from(tr.children).map(td=>td.textContent)
   );
-
-  const archive = {
-    id: Date.now(),
+  return {
+    id: Date.now() + Math.floor(Math.random()*1000),
     archivedAt: new Date().toISOString(),
     label: label,
     dateStart: ds, dateEnd: de,
@@ -1135,12 +1169,33 @@ async function archiveCurrentView(){
     totalCA, totalActes,
     detail
   };
+}
+
+async function pushArchive(archive, successMsg){
   state.archives.unshift(archive);
   try{
     await storage.set('archives', JSON.stringify(state.archives));
-    log('Archive créée : '+(label||'(sans libellé)')+' — '+totalCA, 'ok');
+    log(successMsg, 'ok');
   }catch(e){ log('Erreur lors de l\'archivage : '+e.message, 'err'); }
   renderHistorique();
+}
+
+async function archiveCurrentView(){
+  if(!state.results.length){
+    log('Rien à archiver : lancez un calcul depuis l\'onglet Import d\'abord.', 'err');
+    return;
+  }
+  const label = prompt('Libellé de cette archive (ex. "Juin 2026", "Semaine 25")', '') || '';
+  const archive = buildArchiveSnapshot(label);
+  await pushArchive(archive, 'Archive créée : '+(label||'(sans libellé)')+' — '+archive.totalCA);
+}
+
+/* Appelé automatiquement à la fin de chaque calcul : plus besoin de cliquer
+   sur "Archiver" pour que le chargement reste conservé dans l'historique. */
+async function autoArchiveCurrentCalculation(){
+  if(!state.results.length) return;
+  const archive = buildArchiveSnapshot('Chargement auto');
+  await pushArchive(archive, 'Historique mis à jour automatiquement — '+archive.totalCA);
 }
 
 function renderHistorique(){
@@ -1319,14 +1374,139 @@ async function saveEquipes(){
 }
 
 /* =========================================================================
-   STORAGE (utilise window.storage si disponible [artifact Claude],
-   sinon repli sur localStorage pour un usage en fichier autonome)
+   FIRESTORE — lecture/écriture bas niveau, même logique que le dashboard
+   Qualité (collection "dashboard_ca" dédiée à ce dashboard).
+========================================================================= */
+async function waitForFirebase(){
+  let tries = 0;
+  while (!window.__firebaseReady && tries < 200) {
+    await new Promise((r) => setTimeout(r, 25));
+    tries++;
+  }
+}
+
+async function fsLoad(key, fallback){
+  await waitForFirebase();
+  if (!window.__firebaseConfigured) return { value: fallback, status: "unconfigured" };
+  if (window.__firebaseError || !window.__fb) return { value: fallback, status: "error", error: window.__firebaseError };
+  try {
+    const ref = window.__fb.doc(window.__fb.db, "dashboard_ca", key);
+    const snap = await window.__fb.getDoc(ref);
+    if (snap.exists() && snap.data().payload !== undefined) return { value: snap.data().payload, status: "ok" };
+    return { value: fallback, status: "ok" };
+  } catch (e) {
+    return { value: fallback, status: "error", error: e.message };
+  }
+}
+
+async function fsSave(key, value){
+  if (!window.__firebaseConfigured || window.__firebaseError || !window.__fb) return false;
+  try {
+    const ref = window.__fb.doc(window.__fb.db, "dashboard_ca", key);
+    await window.__fb.setDoc(ref, { payload: value, updatedAt: new Date().toISOString() });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* Sauvegarde "par morceaux" pour les tableaux volumineux (l'historique grossit
+   indéfiniment au fil des chargements) — Firestore refuse tout document
+   dépassant 1 Mo, donc on découpe le tableau en documents "_chunk_N" plus
+   un document "_meta" qui indique combien de morceaux existent. */
+const FS_CHUNK_SIZE = 60;
+
+async function fsSaveChunked(key, arrayValue){
+  if (!window.__firebaseConfigured || window.__firebaseError || !window.__fb) return false;
+  try {
+    const arr = arrayValue || [];
+    const chunks = [];
+    for (let i = 0; i < arr.length; i += FS_CHUNK_SIZE) chunks.push(arr.slice(i, i + FS_CHUNK_SIZE));
+    const metaRef = window.__fb.doc(window.__fb.db, "dashboard_ca", key + "_meta");
+    let prevCount = 0;
+    try {
+      const prevSnap = await window.__fb.getDoc(metaRef);
+      if (prevSnap.exists()) prevCount = prevSnap.data().count || 0;
+    } catch (e) {}
+    await Promise.all(chunks.map((chunk, i) =>
+      window.__fb.setDoc(window.__fb.doc(window.__fb.db, "dashboard_ca", key + "_chunk_" + i), { payload: chunk })
+    ));
+    if (prevCount > chunks.length) {
+      const toDelete = [];
+      for (let i = chunks.length; i < prevCount; i++) {
+        toDelete.push(window.__fb.deleteDoc(window.__fb.doc(window.__fb.db, "dashboard_ca", key + "_chunk_" + i)));
+      }
+      await Promise.all(toDelete);
+    }
+    await window.__fb.setDoc(metaRef, { count: chunks.length, updatedAt: new Date().toISOString() });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function fsLoadChunked(key, fallback){
+  await waitForFirebase();
+  if (!window.__firebaseConfigured) return { value: fallback, status: "unconfigured" };
+  if (window.__firebaseError || !window.__fb) return { value: fallback, status: "error", error: window.__firebaseError };
+  try {
+    const metaRef = window.__fb.doc(window.__fb.db, "dashboard_ca", key + "_meta");
+    const metaSnap = await window.__fb.getDoc(metaRef);
+    if (!metaSnap.exists()) return { value: fallback, status: "ok" };
+    const count = metaSnap.data().count || 0;
+    const chunkSnaps = await Promise.all(
+      Array.from({ length: count }, (_, i) => window.__fb.getDoc(window.__fb.doc(window.__fb.db, "dashboard_ca", key + "_chunk_" + i)))
+    );
+    const merged = [];
+    chunkSnaps.forEach((s) => { if (s.exists() && s.data().payload) merged.push(...s.data().payload); });
+    return { value: merged, status: "ok" };
+  } catch (e) {
+    return { value: fallback, status: "error", error: e.message };
+  }
+}
+
+function updateDbStatusBadge(){
+  const el = document.getElementById('db-status');
+  if(!el) return;
+  if(!window.__firebaseConfigured){
+    el.textContent = 'Base de données : non configurée (stockage local uniquement)';
+  } else if(window.__firebaseError){
+    el.textContent = 'Base de données : hors ligne — repli sur stockage local (' + window.__firebaseError + ')';
+  } else {
+    el.textContent = 'Base de données : connectée ✓ (les chargements sont conservés)';
+  }
+}
+
+/* =========================================================================
+   STORAGE — API utilisée par le reste de l'appli (inchangée), maintenant
+   adossée à Firestore (collection "dashboard_ca") au lieu du localStorage
+   du navigateur, pour que les données survivent au changement de poste/
+   navigateur. window.storage [artifact Claude] reste prioritaire quand
+   disponible ; localStorage reste un dernier repli si Firestore est
+   injoignable.
+   La clé "archives" (l'historique, qui grossit à chaque chargement) est
+   stockée par morceaux (fsSaveChunked/fsLoadChunked) ; les autres clés
+   utilisent un document unique (fsSave/fsLoad).
 ========================================================================= */
 const storage = {
   async get(key){
     if(window.storage && typeof window.storage.get === 'function'){
-      try{ return await window.storage.get(key, false); }catch(e){ /* fallback */ }
+      try{
+        const r = await window.storage.get(key, false);
+        if(r) return r;
+      }catch(e){ /* fallback */ }
     }
+    try{
+      if(key === 'archives'){
+        const res = await fsLoadChunked('archives', null);
+        updateDbStatusBadge();
+        if(res.status === 'ok' && res.value && res.value.length) return { value: JSON.stringify(res.value) };
+      } else {
+        const res = await fsLoad(key, null);
+        updateDbStatusBadge();
+        if(res.status === 'ok' && res.value != null) return { value: res.value };
+      }
+    }catch(e){ /* fallback */ }
     const v = localStorage.getItem('dashca_'+key);
     return v!=null ? {value:v} : null;
   },
@@ -1334,8 +1514,21 @@ const storage = {
     if(window.storage && typeof window.storage.set === 'function'){
       try{ return await window.storage.set(key, value, false); }catch(e){ /* fallback */ }
     }
-    localStorage.setItem('dashca_'+key, value);
-    return {value};
+    let firestoreOk = false;
+    try{
+      if(key === 'archives'){
+        let arr = [];
+        try{ arr = value ? JSON.parse(value) : []; }catch(e){ arr = []; }
+        firestoreOk = await fsSaveChunked('archives', arr);
+      } else {
+        firestoreOk = await fsSave(key, value);
+      }
+      updateDbStatusBadge();
+    }catch(e){ /* fallback */ }
+    // On garde aussi une copie locale : lecture instantanée au prochain
+    // chargement de page et filet de sécurité si Firestore est injoignable.
+    try{ localStorage.setItem('dashca_'+key, value); }catch(e){}
+    return {value, firestoreOk};
   }
 };
 
