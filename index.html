@@ -951,6 +951,7 @@ setupJsonDropzone('dz-json','f-json',(data,file)=>{
     document.getElementById('st-rtt').textContent = file.name+' — '+data.rtt.length+' lignes (JSON)';
     parts.push(data.rtt.length+' RTT');
     refreshAgentReporting();
+    storage.set('raw_rtt', JSON.stringify(state.raw.rtt)).catch(()=>{});
   }
   if(!parts.length){
     log('Fichier JSON reconnu mais aucune clé "entrants"/"sortants"/"mails" (tableaux) trouvée.', 'err');
@@ -1000,6 +1001,7 @@ setupDropzone('dz-rtt','f-rtt',(res,file)=>{
   document.getElementById('st-rtt').textContent = file.name+' — '+sheet.length+' lignes';
   log('RTT chargé : '+sheet.length+' lignes', 'ok');
   refreshAgentReporting();
+  storage.set('raw_rtt', JSON.stringify(state.raw.rtt)).catch(()=>{});
 });
 
 async function clearAllFiles(){
@@ -1008,7 +1010,7 @@ async function clearAllFiles(){
   state.results = [];
   state.agentCaStats = {};
   state.dmt = {global:null, bysite:{}};
-  renderReporting();
+  refreshAgentReporting();
   ['entrants','sortants','mails','repartition','flux','json','rtt'].forEach(k=>{
     document.getElementById('dz-'+k).classList.remove('ok');
     document.getElementById('st-'+k).textContent = 'Aucun fichier chargé';
@@ -1019,6 +1021,8 @@ async function clearAllFiles(){
     await storage.set('last_results', '');
     await storage.set('last_dmt', '');
     await storage.set('last_meta', '');
+    await storage.set('agent_ca_stats', '');
+    await storage.set('raw_rtt', '');
   }catch(e){}
   renderDashboard();
 }
@@ -1180,6 +1184,11 @@ async function runCalculationAsync(){
       }
     };
     await storage.set('last_meta', JSON.stringify(meta));
+    // Sauvegarde des données du Reporting (Vue Agent / Vue Activité) : sans cela, l'onglet
+    // Reporting redevenait vide à chaque réouverture du dashboard car ces données n'étaient
+    // gardées qu'en mémoire (contrairement au CA total qui, lui, était bien sauvegardé).
+    await storage.set('agent_ca_stats', JSON.stringify(state.agentCaStats));
+    await storage.set('raw_rtt', JSON.stringify(state.raw.rtt));
     log('Données sauvegardées — seront rechargées automatiquement à la prochaine ouverture.', 'ok');
   }catch(e){ log('Avertissement : sauvegarde des données impossible ('+e.message+').', 'err'); }
 }
@@ -2199,6 +2208,21 @@ async function loadPersisted(){
       updateDmtDisplay();
     }
   }catch(e){ /* pas de données précédentes, rien à faire */ }
+
+  // Restaurer les données du Reporting (Vue Agent / Vue Activité) : CA/actes par agent
+  // (calculés lors du dernier "Lancer le calcul") + RTT brut, pour que l'onglet Reporting
+  // ne soit plus vide à la réouverture du dashboard.
+  try{
+    const acs = await storage.get('agent_ca_stats');
+    state.agentCaStats = acs ? JSON.parse(acs.value) : {};
+    const rtt = await storage.get('raw_rtt');
+    state.raw.rtt = rtt ? JSON.parse(rtt.value) : [];
+    if(state.raw.rtt.length){
+      document.getElementById('dz-rtt').classList.add('ok');
+      document.getElementById('st-rtt').textContent = (state.files.rtt||'RTT')+' — '+state.raw.rtt.length+' lignes (restauré)';
+    }
+    refreshAgentReporting();
+  }catch(e){ /* pas de données de reporting précédentes, rien à faire */ }
 
   try{
     const arc = await storage.get('archives');
