@@ -42,6 +42,21 @@
     window.__firebaseReady = true;
   }
 </script>
+<script>
+  // Filet de sécurité : si le script Firebase ci-dessus est bloqué avant même
+  // de s'exécuter (réseau restreint, bloqueur de scripts...), les imports ES
+  // échouent et AUCUNE ligne du <script type="module"> ne s'exécute — donc
+  // window.__firebaseReady ne serait jamais positionné et l'appli resterait
+  // bloquée en attente pendant plusieurs dizaines de secondes. Ce filet
+  // force le déblocage après 4s pour basculer proprement sur le stockage local.
+  setTimeout(function(){
+    if(!window.__firebaseReady){
+      if(typeof window.__firebaseConfigured === 'undefined') window.__firebaseConfigured = true;
+      window.__firebaseError = window.__firebaseError || 'Chargement Firebase échoué ou bloqué (réseau)';
+      window.__firebaseReady = true;
+    }
+  }, 4000);
+</script>
 
 <style>
 :root{
@@ -240,13 +255,32 @@ if(sessionStorage.getItem('dashca_auth_user')){
   <button class="tab-btn" data-tab="equipes">3. Répartition équipes</button>
   <button class="tab-btn" data-tab="dashboard">4. Dashboard</button>
   <button class="tab-btn" data-tab="historique">5. Historique</button>
+  <button class="tab-btn" data-tab="glossaire">6. Glossaire KPI</button>
 </nav>
 
 <div class="app app-content" style="display:none;">
 
   <!-- ===================== 1. IMPORT ===================== -->
   <section class="panel active" id="panel-import">
-    <div class="section-title">Fichiers d'extraction</div>
+    <div class="section-title">Import via JSON (recommandé)</div>
+    <div class="grid cols-3" style="margin-bottom:18px;">
+      <div class="card" style="grid-column: span 2;">
+        <h3>Fichier JSON consolidé</h3>
+        <div class="hint">Un seul fichier <code>{"entrants":[...], "sortants":[...], "mails":[...]}</code> — mêmes en-têtes de colonnes que les extractions Excel ci-dessous. Remplace le dépôt manuel des 3 fichiers Excel.</div>
+        <div class="dropzone" id="dz-json" onclick="document.getElementById('f-json').click()">
+          <input type="file" id="f-json" accept=".json">
+          <div class="label">Cliquer ou déposer le fichier .json</div>
+          <div class="status" id="st-json">Aucun fichier chargé</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Modèle JSON</h3>
+        <div class="hint">Télécharge un exemple avec les bons en-têtes de colonnes, à donner à Claude pour synchroniser vos extractions brutes (appels entrants/sortants, mails...) vers ce format.</div>
+        <button class="btn small secondary" onclick="downloadJsonTemplate()">⬇ Télécharger le modèle</button>
+      </div>
+    </div>
+
+    <div class="section-title">Fichiers d'extraction — import manuel (alternative)</div>
     <div class="grid cols-3">
       <div class="card">
         <h3>Appels entrants</h3>
@@ -355,6 +389,22 @@ if(sessionStorage.getItem('dashca_auth_user')){
       </div>
       <div class="footnote" id="dmt-preview">Aucune formule active — la grille tarifaire fixe est utilisée pour les appels sortants.</div>
     </div>
+
+    <div class="section-title" style="margin-top:24px;">Référentiel flux (modifiable)</div>
+    <div class="hint" style="margin-bottom:8px;">Correspondance "Nom de la file d'attente" → "Type d'acte", utilisée pour classer chaque appel/mail entrant. Chargée automatiquement depuis la référence officielle ; modifiable et conservée ici (plus besoin de réimporter le fichier à chaque fois).</div>
+    <div class="row-actions">
+      <button class="btn small" onclick="addFluxRow()">+ Ajouter une ligne</button>
+      <button class="btn small secondary" onclick="saveFluxMap()">Enregistrer le référentiel</button>
+      <button class="btn small secondary" onclick="resetFluxMap()">Réinitialiser aux valeurs par défaut</button>
+      <span id="flux-save-status" style="font-size:11.5px;color:var(--green);"></span>
+      <span id="flux-count" class="footnote"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="flux-table">
+        <thead><tr><th>Nom de la file d'attente</th><th>Type d'acte</th><th></th></tr></thead>
+        <tbody id="flux-body"></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- ===================== 3. REPARTITION EQUIPES ===================== -->
@@ -447,6 +497,11 @@ if(sessionStorage.getItem('dashca_auth_user')){
         <div class="kpi"><div class="lbl">Actes facturables</div><div class="val" id="kpi-actes">—</div><div class="sub" id="kpi-actes-sub"></div></div>
         <div class="kpi"><div class="lbl">DMT sortant</div><div class="val" id="kpi-dmt">—</div><div class="sub" id="kpi-dmt-sub"></div></div>
       </div>
+      <div class="grid cols-3" style="margin-top:10px;">
+        <div class="kpi"><div class="lbl">Appels entrants</div><div class="val" id="kpi-entrants">—</div><div class="sub">Actes traités (glossaire KPI)</div></div>
+        <div class="kpi"><div class="lbl">Appels sortants</div><div class="val" id="kpi-sortants">—</div><div class="sub">Actes traités (glossaire KPI)</div></div>
+        <div class="kpi"><div class="lbl">Mails traités</div><div class="val" id="kpi-mails">—</div><div class="sub">Actes traités (glossaire KPI)</div></div>
+      </div>
       <div class="footnote" style="margin-top:-8px;margin-bottom:8px;" id="dmt-filter-note"></div>
       <div class="footnote" style="margin-bottom:8px;">📅 Les actes du dimanche et des jours fériés légaux français (1er janvier, lundi de Pâques, 1er mai, 8 mai, Ascension, lundi de Pentecôte, 14 juillet, 15 août, Toussaint, Armistice, Noël — 2026) sont automatiquement facturés au tarif "Jour Férié" de la grille tarifaire.</div>
 
@@ -479,6 +534,41 @@ if(sessionStorage.getItem('dashca_auth_user')){
           <th>Actes</th><th>CA (€)</th><th></th>
         </tr></thead>
         <tbody id="historique-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== 6. GLOSSAIRE KPI ===================== -->
+  <section class="panel" id="panel-glossaire">
+    <div class="section-title">Glossaire des KPI</div>
+    <div class="footnote" style="margin-bottom:14px;">
+      ✅ = déjà calculé dans ce dashboard à partir des extractions actuelles (entrants/sortants/mails).
+      ⏳ = nécessite un nouvel export non encore fourni (RTT / temps de connexion, transferts) — dès qu'il sera partagé, ces KPI seront activés.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th></th><th>KPI</th><th>Source</th><th>Type</th><th>Numérateur</th><th>Dénominateur</th>
+        </tr></thead>
+        <tbody>
+          <tr><td>✅</td><td>CA</td><td>—</td><td>Entier €</td><td>Nombre d'actes traités (Mail, appel sortant, appel entrant) × la grille de facturation</td><td>1</td></tr>
+          <tr><td>⏳</td><td>CA/H</td><td>—</td><td>Entier €</td><td>Nombre d'actes traités × la grille de facturation</td><td>Heures de log</td></tr>
+          <tr><td>✅</td><td>Actes traités</td><td>—</td><td>—</td><td>Mails traités + Appels entrants + Appels sortants</td><td>—</td></tr>
+          <tr><td>✅</td><td>Mails traités</td><td>Mails traités</td><td>Nombre</td><td>Nombre de lignes avec le nom du conseiller, marquées traitées</td><td>1</td></tr>
+          <tr><td>✅</td><td>Appels entrants</td><td>Appels entrants</td><td>Nombre</td><td>Nombre de lignes avec le nom du conseiller sur une file mappée</td><td>1</td></tr>
+          <tr><td>⏳</td><td>MEA</td><td>Appels entrants</td><td>Entier</td><td>Somme des temps de mise en attente par conseiller</td><td>Appels entrants</td></tr>
+          <tr><td>⏳</td><td>ACW</td><td>Appels entrants</td><td>Entier</td><td>Somme des After Call Work Time par conseiller</td><td>Appels entrants</td></tr>
+          <tr><td>✅</td><td>Appels sortants</td><td>Appels sortants</td><td>Nombre</td><td>Nombre de lignes avec le nom du conseiller</td><td>1</td></tr>
+          <tr><td>⏳</td><td>Heures de log</td><td>RTT</td><td>Entier</td><td>Temps de connexion par conseiller</td><td>3600 (conversion en heures)</td></tr>
+          <tr><td>⏳</td><td>Taux de retrait</td><td>RTT</td><td>Pourcentage</td><td>Somme des temps de retrait (pause, brief, réunions...) par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Temps de dispo</td><td>RTT</td><td>Pourcentage</td><td>Temps disponible par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Taux d'occupation</td><td>RTT</td><td>Pourcentage</td><td>Temps en communication + après-appel + attente</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Taux panier</td><td>RTT</td><td>Pourcentage</td><td>Temps "panier" par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Taux Pause</td><td>RTT</td><td>Pourcentage</td><td>Temps de pause par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Taux brief</td><td>RTT</td><td>Pourcentage</td><td>Temps de brief par conseiller</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Prod / h</td><td>—</td><td>Entier</td><td>Actes traités</td><td>Heures de log</td></tr>
+          <tr><td>⏳</td><td>Taux de transfert</td><td>Taux de transfert</td><td>Pourcentage</td><td>Appels transférés</td><td>Appels traités</td></tr>
+        </tbody>
       </table>
     </div>
   </section>
@@ -537,6 +627,60 @@ const DEFAULT_FLUX = [
   ["V RED SAV Partner 3","SAV"],["SAV Partner 3","SAV"],["V TSAV Partner 3","SAV"],
   ["V SAV BO Internal","SAV"],["V TSAV Partner 2","SAV"],
 ].map(r=>({queue:r[0],type:r[1]}));
+const FLUX_VERSION = 1; // Incrémenter si le référentiel flux officiel change
+
+// Référence officielle "Répartition_equipes.xlsx" (Lot Unique + SAV), transcrite telle quelle
+// (y compris quelques doublons/ID réutilisés présents dans le fichier source).
+const EQUIPES_VERSION = 1; // Incrémenter à chaque mise à jour officielle de la répartition d'équipes
+const DEFAULT_LOT_UNIQUE = [
+  ["CASABLANCA","Samira TER_PST32_558"], ["CASABLANCA","ALI TER_PST32_698"], ["CASABLANCA","ZAKARIA TER_PST32_702"], ["CASABLANCA","ALI TER_PST32_754"],
+  ["CASABLANCA","SAIDA TER_PST32_755"], ["CASABLANCA","AYOUB TER_PST32_756"], ["CASABLANCA","SALIMATA TER_PST32_758"], ["CASABLANCA","JAWAD TER_PST32_761"],
+  ["CASABLANCA","ABDELJALIL TER_PST32_762"], ["CASABLANCA","Taha TER_PST32_786"], ["CASABLANCA","Chaimaa TER_PST32_779"], ["CASABLANCA","Rihane TER_PST32_783"],
+  ["CASABLANCA","Afaf TER_PST32_784"], ["Fes","OTHMANE TER_PST32_580"], ["Fes","IMAD TER_PST32_581"], ["Fes","ZAKARIAE TER_PST32_582"],
+  ["Fes","YACINE TER_PST32_583"], ["Fes","FATIMA TER_PST32_584"], ["Fes","FAHD TER_PST32_585"], ["Fes","RIM TER_PST32_586"],
+  ["Fes","MERYEM TER_PST32_587"], ["Fes","ANAS TER_PST32_588"], ["Fes","NAOUAL TER_PST32_589"], ["Fes","ABDELALI TER_PST32_590"],
+  ["Fes","TARIQ TER_PST32_591"], ["Fes","AZIZA TER_PST32_592"], ["Fes","IMANE TER_PST32_593"], ["Fes","Mereyem TER_PST32_594"],
+  ["Fes","AYOUB TER_PST32_595"], ["Fes","DOUNIA TER_PST32_608"], ["Fes","ZAKARIA TER_PST32_609"], ["Fes","AYMAN TER_PST32_610"],
+  ["Fes","TAHA TER_PST32_611"], ["Fes","SAFAE TER_PST32_612"], ["Fes","KENZA TER_PST32_613"], ["Fes","NASSIM TER_PST32_614"],
+  ["Fes","MAROUANE TER_PST32_615"], ["Fes","ILYAS TER_PST32_616"], ["Fes","OUMAIMA TER_PST32_617"], ["Fes","Chaimae TER_PST32_618"],
+  ["Fes","EL HADJI TER_PST32_619"], ["Fes","MOHAMED TER_PST32_620"], ["Fes","HICHAM TER_PST32_621"], ["Fes","HAFSsA TER_PST32_622"],
+  ["Fes","SIDI TER_PST32_623"], ["Fes","FATIMA TER_PST32_624"], ["Fes","ALI TER_PST32_625"], ["Fes","HIND TER_PST32_637"],
+  ["Fes","GHITA TER_PST32_638"], ["Fes","ISSAM TER_PST32_639"], ["Fes","Adil TER_PST32_685"], ["Fes","Ali TER_PST32_682"],
+  ["Fes","Fatima TER_PST32_689"], ["Fes","Ghita TER_PST32_686"], ["Fes","Loqmane TER_PST32_681"], ["Fes","Omar TER_PST32_680"],
+  ["Fes","Rabab TER_PST32_690"], ["Fes","Rajae TER_PST32_684"], ["Fes","Rokaya TER_PST32_679"], ["Fes","Soufiane TER_PST32_683"],
+  ["Fes","Soukayna TER_PST32_688"], ["Fes","Sanae TER_PST32_687"], ["Fes","MOHAMMED TER_PST32_765"], ["Fes","NAJIB TER_PST32_766"],
+  ["Fes","MOHAMMED TER_PST32_765"], ["Fes","NAJIB TER_PST32_766"], ["Fes","FATIMA TER_PST32_767"], ["Fes","ZAKARIA TER_PST32_768"],
+  ["Fes","ZAKARIAE TER_PST32_769"], ["Fes","HAJAR TER_PST32_770"], ["Fes","RAKI TER_PST32_771"], ["Fes","ASMAE TER_PST32_772"],
+  ["Fes","NAOUFAL TER_PST32_773"], ["Fes","IKRAM TER_PST32_774"], ["Fes","KHADIJA TER_PST32_775"], ["Fes","Gisèle TER_PST32_583"],
+  ["Fes","ILYAS TER_PST32_616"], ["Fes","CHAYMAE TER_PST32_804"], ["FES","Gisèle TER_PST32_583"], ["Mada","Felicia TER_PST32_716"],
+  ["Mada","Rosa TER_PST32_669"], ["Mada","Carine TER_PST32_660"], ["Mada","Rojo TER_PST32_641"], ["Mada","Finaritra TER_PST32_663"],
+  ["Mada","Aina TER_PST32_658"], ["Mada","Huguette TER_PST32_654"], ["Mada","Samoina TER_PST32_652"], ["Mada","Tsiory TER_PST32_644"],
+  ["Mada","AMINATA TER_PST32_704"], ["Mada","HERILALA TER_PST32_705"], ["Mada","ANNA TER_PST32_706"], ["Mada","FEHIZORO TER_PST32_707"],
+  ["Mada","KENNY TER_PST32_708"], ["Mada","ANJANIAINA TER_PST32_709"], ["Mada","MIALITIANA TER_PST32_710"], ["Mada","HARIVOLA TER_PST32_711"],
+  ["Mada","ROMEO TER_PST32_712"], ["Mada","TSITONIAINA TER_PST32_713"], ["Mada","ANGELA TER_PST32_714"], ["Mada","JOELLA TER_PST32_715"],
+  ["Mada","SOLANGE TER_PST32_716"], ["Mada","FITIAVANA TER_PST32_717"], ["Mada","ESTEL TER_PST32_718"], ["Mada","FANOMEZANA TER_PST32_719"],
+  ["Mada","NOMENA TER_PST32_720"], ["Mada","TSIARO TER_PST32_721"], ["Mada","SUZANNE TER_PST32_722"], ["Mada","ANNICK TER_PST32_723"],
+  ["Mada","AINA TER_PST32_724"], ["Mada","LOLA TER_PST32_725"], ["Mada","SABRINETTE TER_PST32_726"], ["Mada","VANESSA TER_PST32_727"],
+  ["Mada","SAMIRAH TER_PST32_728"], ["Mada","ERIC TER_PST32_729"], ["Mada","SAROBIDY TER_PST32_730"], ["Mada","NASANDRATRA TER_PST32_731"],
+  ["Mada","ALEX TER_PST32_732"], ["Mada","NATHANAËL TER_PST32_733"], ["Mada","TOLOTRA TER_PST32_734"], ["Mada","LUCKA TER_PST32_735"],
+  ["Mada","ASHMYHR TER_PST32_736"], ["Mada","DIAMONDRA TER_PST32_737"], ["Mada","HANITRA TER_PST32_738"], ["Mada","VOLANIAINA TER_PST32_739"],
+  ["Mada","BRIAN TER_PST32_740"], ["Mada","RITAH TER_PST32_741"], ["Mada","SOMBINIAINA TER_PST32_742"], ["Mada","ANGELO TER_PST32_743"],
+  ["Mada","FANIRIANTSOA TER_PST32_744"], ["Mada","VIRGINIA TER_PST32_745"], ["Mada","AVOTRA TER_PST32_746"], ["Mada","FANANTENANA TER_PST32_747"],
+  ["Mada","JUDIANNAH TER_PST32_748"], ["Mada","CHRISTIAN TER_PST32_749"], ["Mada","HERY TER_PST32_750"], ["Mada","IBRAMDJEE TER_PST32_751"],
+  ["Mada","MAMPIONONA TER_PST32_752"], ["Mada","Thomas TER_PST32_667"], ["Mada","Mira TER_PST32_656"], ["Mada","Mialy TER_PST32_710"],
+  ["Mada","Elodie TER_PST32_642"], ["Mada","Jacky TER_PST32_647"], ["Mada","Joeca TER_PST32_666"], ["Mada","Nomena TER_PST32_657"],
+  ["Mada","Sarobidy TER_PST32_678"], ["Mada","Seth TER_PST32_711"], ["Mada","Tony TER_PST32_734"], ["Mada","DERA TER_PST32_789"],
+  ["Mada","DIAMONDRA TER_PST32_737"], ["Mada","SYLVIA TER_PST32_791"], ["Mada","MICKAEL TER_PST32_792"], ["Mada","VOLANA TER_PST32_793"],
+  ["Mada","MICHAEL TER_PST32_795"], ["Mada","MURIELLE TER_PST32_796"], ["Mada","MANITRA TER_PST32_797"], ["Mada","MIHANTA TER_PST32_798"],
+  ["Mada","TIAVINA TER_PST32_799"], ["Mada","HARIZO TER_PST32_800"], ["Mada","ANDRY TER_PST32_802"], ["Mada","SONIA TER_PST32_803"],
+  ["CASABLANCA","Houssam TER_PST32_827"], ["CASABLANCA","Ylyas TER_PST32_826"], ["CASABLANCA","Salma TER_PST32_825"], ["CASABLANCA","Youness TER_PST32_824"],
+  ["CASABLANCA","Amine TER_PST32_822"], ["CASABLANCA","Achraf TER_PST32_821"],
+].map(r=>({site:r[0],agent:r[1]}));
+const DEFAULT_SAV = [
+  ["CASABLANCA","Bouchra TER_PST32_209"], ["CASABLANCA","Hanane TER_PST32_382"], ["CASABLANCA","Seydina Ababacar TER_PST32_210"], ["CASABLANCA","Salma TER_PST32_440"],
+  ["CASABLANCA","Asmaa TER_PST32_692"], ["CASABLANCA","Yassine TER_PST32_691"], ["CASABLANCA","Yousra TER_PST32_243"], ["CASABLANCA","Imane TER_PST32_436"],
+  ["CASABLANCA","Kamar TER_PST32_701"], ["CASABLANCA","Ahlam TER_PST32_696"], ["CASABLANCA","Achraf TER_PST32_106"],
+].map(r=>({site:r[0],agent:r[1]}));
 
 /* =========================================================================
    UTILS
@@ -670,6 +814,51 @@ function setupDropzone(id, inputId, onLoaded){
   }
 }
 
+/* Import JSON — alternative aux 3 dropzones Excel entrants/sortants/mails :
+   un seul fichier {entrants:[...], sortants:[...], mails:[...]} où chaque
+   tableau contient les lignes brutes avec exactement les mêmes en-têtes de
+   colonnes que les extractions Excel (voir downloadJsonTemplate()). */
+function setupJsonDropzone(id, inputId, onLoaded){
+  const dz = document.getElementById(id);
+  const input = document.getElementById(inputId);
+  input.addEventListener('change', (e)=>{
+    if(e.target.files[0]) handle(e.target.files[0]);
+  });
+  dz.addEventListener('dragover', e=>{e.preventDefault(); dz.style.borderColor='var(--blue)';});
+  dz.addEventListener('drop', e=>{
+    e.preventDefault();
+    if(e.dataTransfer.files[0]) handle(e.dataTransfer.files[0]);
+  });
+  function handle(file){
+    file.text().then(txt=>{
+      let data;
+      try{ data = JSON.parse(txt); }
+      catch(e){ log('JSON invalide ('+file.name+') : '+e.message, 'err'); return; }
+      onLoaded(data, file);
+    }).catch(err=>{
+      log('Erreur de lecture ('+file.name+') : '+err.message, 'err');
+    });
+  }
+}
+function downloadJsonTemplate(){
+  const template = {
+    entrants: [
+      {"Nom de la file d'attente":"V HYPER Partner 3", "Agent: Nom complet":"Samira TER_PST32_558", "Date de création":"2026-08-24"}
+    ],
+    sortants: [
+      {"Agent: Nom complet":"Samira TER_PST32_558", "Date de création":"2026-08-24", "Répondu":1, "After Call Work Time":45, "Durée totale de l'appel":180}
+    ],
+    mails: [
+      {"Conseiller: Nom complet":"Samira TER_PST32_558", "Date du message":"2026-08-24", "Traité":1}
+    ]
+  };
+  const blob = new Blob([JSON.stringify(template, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'modele_import_ca_tersea.json';
+  a.click();
+}
+
 /* =========================================================================
    INIT DROPZONES
 ========================================================================= */
@@ -696,6 +885,37 @@ setupDropzone('dz-mails','f-mails',(res,file)=>{
   document.getElementById('dz-mails').classList.add('ok');
   document.getElementById('st-mails').textContent = file.name+' — '+sheet.length+' lignes';
   log('Mails chargés : '+sheet.length+' lignes', 'ok');
+});
+setupJsonDropzone('dz-json','f-json',(data,file)=>{
+  let parts = [];
+  if(Array.isArray(data.entrants)){
+    state.raw.entrants = data.entrants;
+    state.files.entrants = file.name+' (JSON)';
+    document.getElementById('dz-entrants').classList.add('ok');
+    document.getElementById('st-entrants').textContent = file.name+' — '+data.entrants.length+' lignes (JSON)';
+    parts.push(data.entrants.length+' entrants');
+  }
+  if(Array.isArray(data.sortants)){
+    state.raw.sortants = data.sortants;
+    state.files.sortants = file.name+' (JSON)';
+    document.getElementById('dz-sortants').classList.add('ok');
+    document.getElementById('st-sortants').textContent = file.name+' — '+data.sortants.length+' lignes (JSON)';
+    parts.push(data.sortants.length+' sortants');
+  }
+  if(Array.isArray(data.mails)){
+    state.raw.mails = data.mails;
+    state.files.mails = file.name+' (JSON)';
+    document.getElementById('dz-mails').classList.add('ok');
+    document.getElementById('st-mails').textContent = file.name+' — '+data.mails.length+' lignes (JSON)';
+    parts.push(data.mails.length+' mails');
+  }
+  if(!parts.length){
+    log('Fichier JSON reconnu mais aucune clé "entrants"/"sortants"/"mails" (tableaux) trouvée.', 'err');
+    return;
+  }
+  document.getElementById('dz-json').classList.add('ok');
+  document.getElementById('st-json').textContent = file.name+' — '+parts.join(', ');
+  log('Import JSON chargé : '+parts.join(', ')+'. Cliquez sur "▶ Lancer le calcul".', 'ok');
 });
 setupDropzone('dz-repartition','f-repartition',(res,file)=>{
   let lotSheet=null, savSheet=null;
@@ -735,7 +955,7 @@ async function clearAllFiles(){
   state.files = {entrants:null, sortants:null, mails:null, repartition:null, flux:null};
   state.results = [];
   state.dmt = {global:null, bysite:{}};
-  ['entrants','sortants','mails','repartition','flux'].forEach(k=>{
+  ['entrants','sortants','mails','repartition','flux','json'].forEach(k=>{
     document.getElementById('dz-'+k).classList.remove('ok');
     document.getElementById('st-'+k).textContent = 'Aucun fichier chargé';
     document.getElementById('f-'+k).value = '';
@@ -1092,6 +1312,17 @@ function renderDashboard(){
     });
   }
 
+  // Répartition "Actes traités" par type (glossaire KPI : Mails traités / Appels entrants / Appels sortants)
+  let qtyAppelsEntrants=0, qtyAppelsSortants=0, qtyMails=0;
+  filtered.forEach(r=>{
+    if(r.type === 'Appels sortants') qtyAppelsSortants += r.qty;
+    else if(r.type === 'Mails') qtyMails += r.qty;
+    else qtyAppelsEntrants += r.qty; // HYPER / C2E / AFR / Drive / Actes traités (SAV)
+  });
+  document.getElementById('kpi-entrants').textContent = fmtNum(qtyAppelsEntrants);
+  document.getElementById('kpi-sortants').textContent = fmtNum(qtyAppelsSortants);
+  document.getElementById('kpi-mails').textContent = fmtNum(qtyMails);
+
   document.getElementById('kpi-ca').textContent = fmtEUR(totalCA);
   document.getElementById('kpi-ca-sub').textContent = ds && de ? ('Période '+ds+' → '+de) : '';
   document.getElementById('kpi-actes').textContent = fmtNum(totalQty);
@@ -1112,7 +1343,12 @@ function renderDashboard(){
     tbody.appendChild(tr);
   });
 
-  renderCharts(bySite, byActivite);
+  // Les graphiques dépendent de Chart.js (CDN externe) : s'il est indisponible
+  // (réseau restreint, bloqueur de scripts...), on ne doit pas perdre pour
+  // autant les KPI/le détail déjà affichés ci-dessus, ni bloquer l'archivage
+  // automatique qui s'exécute juste après ce calcul (voir runCalculationAsync).
+  try{ renderCharts(bySite, byActivite); }
+  catch(e){ log('Graphiques indisponibles (Chart.js non chargé) : '+e.message, 'err'); }
 }
 
 let chartSite, chartActivite;
@@ -1239,6 +1475,9 @@ function viewArchive(id){
   document.getElementById('kpi-dmt').textContent = '—';
   document.getElementById('kpi-dmt-sub').textContent = '';
   document.getElementById('dmt-filter-note').textContent = '';
+  document.getElementById('kpi-entrants').textContent = '—';
+  document.getElementById('kpi-sortants').textContent = '—';
+  document.getElementById('kpi-mails').textContent = '—';
 
   const tbody = document.getElementById('detail-body');
   tbody.innerHTML='';
@@ -1292,6 +1531,47 @@ function removeTarifRow(i){
 function resetTarifs(){
   state.tarifs = JSON.parse(JSON.stringify(DEFAULT_TARIFS));
   renderTarifs();
+}
+
+/* =========================================================================
+   RÉFÉRENTIEL FLUX (modifiable, persisté — voir "Répartition des actes par flux")
+========================================================================= */
+function renderFluxMap(){
+  const tbody = document.getElementById('flux-body');
+  if(!tbody) return;
+  tbody.innerHTML='';
+  state.fluxMap.forEach((f, i)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="text" value="${f.queue}" onchange="updateFlux(${i},'queue',this.value)"></td>
+      <td><input type="text" value="${f.type}" onchange="updateFlux(${i},'type',this.value)"></td>
+      <td><button class="btn small danger" onclick="removeFluxRow(${i})">✕</button></td>`;
+    tbody.appendChild(tr);
+  });
+  const c = document.getElementById('flux-count');
+  if(c) c.textContent = state.fluxMap.length+' correspondances';
+}
+function updateFlux(i, field, val){
+  state.fluxMap[i][field] = val;
+}
+function addFluxRow(){
+  state.fluxMap.push({queue:'', type:''});
+  renderFluxMap();
+}
+function removeFluxRow(i){
+  state.fluxMap.splice(i,1);
+  renderFluxMap();
+}
+function resetFluxMap(){
+  state.fluxMap = JSON.parse(JSON.stringify(DEFAULT_FLUX));
+  renderFluxMap();
+}
+async function saveFluxMap(){
+  try{
+    await storage.set('flux_map', JSON.stringify(state.fluxMap));
+    const s = document.getElementById('flux-save-status');
+    if(s){ s.textContent = '✓ Enregistré'; setTimeout(()=>s.textContent='', 2000); }
+  }catch(e){ log('Erreur sauvegarde référentiel flux : '+e.message, 'err'); }
 }
 async function saveTarifs(){
   try{
@@ -1569,14 +1849,40 @@ async function loadPersisted(){
   }catch(e){ state.dmtFormula = ''; }
 
   try{
-    const l = await storage.get('lot_unique');
-    state.lotUnique = l ? JSON.parse(l.value) : [];
-  }catch(e){ state.lotUnique = []; }
+    const v = await storage.get('equipes_version');
+    const savedVersion = v ? Number(v.value) : 0;
+    if(savedVersion < EQUIPES_VERSION){
+      // Nouvelle version de référence disponible -> on l'applique et on écrase l'ancienne
+      state.lotUnique = JSON.parse(JSON.stringify(DEFAULT_LOT_UNIQUE));
+      state.sav = JSON.parse(JSON.stringify(DEFAULT_SAV));
+      await storage.set('lot_unique', JSON.stringify(state.lotUnique));
+      await storage.set('sav_team', JSON.stringify(state.sav));
+      await storage.set('equipes_version', String(EQUIPES_VERSION));
+      log('Répartition d\'équipes initialisée depuis la référence officielle ('+state.lotUnique.length+' Lot Unique, '+state.sav.length+' SAV).', 'ok');
+    } else {
+      const l = await storage.get('lot_unique');
+      state.lotUnique = l ? JSON.parse(l.value) : JSON.parse(JSON.stringify(DEFAULT_LOT_UNIQUE));
+      const s = await storage.get('sav_team');
+      state.sav = s ? JSON.parse(s.value) : JSON.parse(JSON.stringify(DEFAULT_SAV));
+    }
+  }catch(e){
+    state.lotUnique = JSON.parse(JSON.stringify(DEFAULT_LOT_UNIQUE));
+    state.sav = JSON.parse(JSON.stringify(DEFAULT_SAV));
+  }
 
   try{
-    const s = await storage.get('sav_team');
-    state.sav = s ? JSON.parse(s.value) : [];
-  }catch(e){ state.sav = []; }
+    const fv = await storage.get('flux_version');
+    const savedFluxVersion = fv ? Number(fv.value) : 0;
+    if(savedFluxVersion < FLUX_VERSION){
+      state.fluxMap = JSON.parse(JSON.stringify(DEFAULT_FLUX));
+      await storage.set('flux_map', JSON.stringify(state.fluxMap));
+      await storage.set('flux_version', String(FLUX_VERSION));
+    } else {
+      const fm = await storage.get('flux_map');
+      state.fluxMap = fm ? JSON.parse(fm.value) : JSON.parse(JSON.stringify(DEFAULT_FLUX));
+    }
+  }catch(e){ state.fluxMap = JSON.parse(JSON.stringify(DEFAULT_FLUX)); }
+  renderFluxMap();
 
   try{
     const b = await storage.get('barcelone_heures');
